@@ -7,6 +7,7 @@ import {
   Plus,
   RefreshCw,
   StopCircle,
+  Settings,
 } from 'lucide-react';
 import {
   Tooltip,
@@ -21,7 +22,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu.tsx';
-import { makeRequest } from '@/lib/api.ts';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog.tsx';
+import BranchSelector from '@/components/tasks/BranchSelector.tsx';
+import { attemptsApi, executionProcessesApi } from '@/lib/api.ts';
 import {
   Dispatch,
   SetStateAction,
@@ -32,9 +42,9 @@ import {
   useState,
 } from 'react';
 import type {
-  ApiResponse,
   BranchStatus,
   ExecutionProcess,
+  GitBranch,
   TaskAttempt,
 } from 'shared/types.ts';
 import {
@@ -78,6 +88,7 @@ type Props = {
     id: string;
     name: string;
   }[];
+  branches: GitBranch[];
 };
 
 function CurrentAttempt({
@@ -89,6 +100,7 @@ function CurrentAttempt({
   creatingPR,
   handleEnterCreateAttemptMode,
   availableExecutors,
+  branches,
 }: Props) {
   const { task, projectId, handleOpenInEditor, projectHasDevScript } =
     useContext(TaskDetailsContext);
@@ -108,6 +120,8 @@ function CurrentAttempt({
   const [isHoveringDevServer, setIsHoveringDevServer] = useState(false);
   const [branchStatus, setBranchStatus] = useState<BranchStatus | null>(null);
   const [branchStatusLoading, setBranchStatusLoading] = useState(false);
+  const [showRebaseDialog, setShowRebaseDialog] = useState(false);
+  const [selectedRebaseBranch, setSelectedRebaseBranch] = useState<string>('');
 
   const processedDevServerLogs = useMemo(() => {
     if (!devServerDetails) return 'No output yet...';
@@ -132,15 +146,11 @@ function CurrentAttempt({
     if (!runningDevServer || !task || !selectedAttempt) return;
 
     try {
-      const response = await makeRequest(
-        `/api/projects/${projectId}/execution-processes/${runningDevServer.id}`
+      const result = await executionProcessesApi.getDetails(
+        projectId,
+        runningDevServer.id
       );
-      if (response.ok) {
-        const result: ApiResponse<ExecutionProcess> = await response.json();
-        if (result.success && result.data) {
-          setDevServerDetails(result.data);
-        }
-      }
+      setDevServerDetails(result);
     } catch (err) {
       console.error('Failed to fetch dev server details:', err);
     }
@@ -163,23 +173,11 @@ function CurrentAttempt({
     setIsStartingDevServer(true);
 
     try {
-      const response = await makeRequest(
-        `/api/projects/${projectId}/tasks/${selectedAttempt.task_id}/attempts/${selectedAttempt.id}/start-dev-server`,
-        {
-          method: 'POST',
-        }
+      await attemptsApi.startDevServer(
+        projectId,
+        selectedAttempt.task_id,
+        selectedAttempt.id
       );
-
-      if (!response.ok) {
-        throw new Error('Failed to start dev server');
-      }
-
-      const data: ApiResponse<null> = await response.json();
-
-      if (!data.success) {
-        throw new Error(data.message || 'Failed to start dev server');
-      }
-
       fetchAttemptData(selectedAttempt.id, selectedAttempt.task_id);
     } catch (err) {
       console.error('Failed to start dev server:', err);
@@ -194,17 +192,12 @@ function CurrentAttempt({
     setIsStartingDevServer(true);
 
     try {
-      const response = await makeRequest(
-        `/api/projects/${projectId}/tasks/${selectedAttempt.task_id}/attempts/${selectedAttempt.id}/execution-processes/${runningDevServer.id}/stop`,
-        {
-          method: 'POST',
-        }
+      await attemptsApi.stopExecutionProcess(
+        projectId,
+        selectedAttempt.task_id,
+        selectedAttempt.id,
+        runningDevServer.id
       );
-
-      if (!response.ok) {
-        throw new Error('Failed to stop dev server');
-      }
-
       fetchAttemptData(selectedAttempt.id, selectedAttempt.task_id);
     } catch (err) {
       console.error('Failed to stop dev server:', err);
@@ -218,19 +211,15 @@ function CurrentAttempt({
 
     try {
       setIsStopping(true);
-      const response = await makeRequest(
-        `/api/projects/${projectId}/tasks/${selectedAttempt.task_id}/attempts/${selectedAttempt.id}/stop`,
-        {
-          method: 'POST',
-        }
+      await attemptsApi.stop(
+        projectId,
+        selectedAttempt.task_id,
+        selectedAttempt.id
       );
-
-      if (response.ok) {
-        await fetchAttemptData(selectedAttempt.id, selectedAttempt.task_id);
-        setTimeout(() => {
-          fetchAttemptData(selectedAttempt.id, selectedAttempt.task_id);
-        }, 1000);
-      }
+      await fetchAttemptData(selectedAttempt.id, selectedAttempt.task_id);
+      setTimeout(() => {
+        fetchAttemptData(selectedAttempt.id, selectedAttempt.task_id);
+      }, 1000);
     } catch (err) {
       console.error('Failed to stop executions:', err);
     } finally {
@@ -259,30 +248,21 @@ function CurrentAttempt({
 
     try {
       setBranchStatusLoading(true);
-      const response = await makeRequest(
-        `/api/projects/${projectId}/tasks/${selectedAttempt.task_id}/attempts/${selectedAttempt.id}/branch-status`
+      const result = await attemptsApi.getBranchStatus(
+        projectId,
+        selectedAttempt.task_id,
+        selectedAttempt.id
       );
-
-      if (response.ok) {
-        const result: ApiResponse<BranchStatus> = await response.json();
-        if (result.success && result.data) {
-          setBranchStatus((prev) => {
-            if (JSON.stringify(prev) === JSON.stringify(result.data))
-              return prev;
-            return result.data;
-          });
-        } else {
-          setError('Failed to load branch status');
-        }
-      } else {
-        setError('Failed to load branch status');
-      }
+      setBranchStatus((prev) => {
+        if (JSON.stringify(prev) === JSON.stringify(result)) return prev;
+        return result;
+      });
     } catch (err) {
       setError('Failed to load branch status');
     } finally {
       setBranchStatusLoading(false);
     }
-  }, [projectId, selectedAttempt?.id, selectedAttempt?.task_id]);
+  }, [projectId, selectedAttempt?.id, selectedAttempt?.task_id, setError]);
 
   // Fetch branch status when selected attempt changes
   useEffect(() => {
@@ -296,26 +276,17 @@ function CurrentAttempt({
 
     try {
       setMerging(true);
-      const response = await makeRequest(
-        `/api/projects/${projectId}/tasks/${selectedAttempt.task_id}/attempts/${selectedAttempt.id}/merge`,
-        {
-          method: 'POST',
-        }
+      await attemptsApi.merge(
+        projectId,
+        selectedAttempt.task_id,
+        selectedAttempt.id
       );
-
-      if (response.ok) {
-        const result: ApiResponse<string> = await response.json();
-        if (result.success) {
-          // Refetch branch status to show updated state
-          fetchBranchStatus();
-        } else {
-          setError(result.message || 'Failed to merge changes');
-        }
-      } else {
-        setError('Failed to merge changes');
-      }
-    } catch (err) {
-      setError('Failed to merge changes');
+      // Refetch branch status to show updated state
+      fetchBranchStatus();
+    } catch (error) {
+      console.error('Failed to merge changes:', error);
+      // @ts-expect-error it is type ApiError
+      setError(error.message || 'Failed to merge changes');
     } finally {
       setMerging(false);
     }
@@ -326,29 +297,50 @@ function CurrentAttempt({
 
     try {
       setRebasing(true);
-      const response = await makeRequest(
-        `/api/projects/${projectId}/tasks/${selectedAttempt.task_id}/attempts/${selectedAttempt.id}/rebase`,
-        {
-          method: 'POST',
-        }
+      await attemptsApi.rebase(
+        projectId,
+        selectedAttempt.task_id,
+        selectedAttempt.id
       );
-
-      if (response.ok) {
-        const result: ApiResponse<string> = await response.json();
-        if (result.success) {
-          // Refresh branch status after rebase
-          fetchBranchStatus();
-        } else {
-          setError(result.message || 'Failed to rebase branch');
-        }
-      } else {
-        setError('Failed to rebase branch');
-      }
+      // Refresh branch status after rebase
+      fetchBranchStatus();
     } catch (err) {
       setError('Failed to rebase branch');
     } finally {
       setRebasing(false);
     }
+  };
+
+  const handleRebaseWithNewBranch = async (newBaseBranch: string) => {
+    if (!projectId || !selectedAttempt?.id || !selectedAttempt?.task_id) return;
+
+    try {
+      setRebasing(true);
+      await attemptsApi.rebase(
+        projectId,
+        selectedAttempt.task_id,
+        selectedAttempt.id,
+        newBaseBranch
+      );
+      // Refresh branch status after rebase
+      fetchBranchStatus();
+      setShowRebaseDialog(false);
+    } catch (err) {
+      setError('Failed to rebase branch');
+    } finally {
+      setRebasing(false);
+    }
+  };
+
+  const handleRebaseDialogConfirm = () => {
+    if (selectedRebaseBranch) {
+      handleRebaseWithNewBranch(selectedRebaseBranch);
+    }
+  };
+
+  const handleRebaseDialogOpen = () => {
+    setSelectedRebaseBranch('');
+    setShowRebaseDialog(true);
   };
 
   const handleCreatePRClick = async () => {
@@ -410,8 +402,28 @@ function CurrentAttempt({
         </div>
 
         <div>
-          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-            Base Branch
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+            <span>Base Branch</span>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleRebaseDialogOpen}
+                    disabled={
+                      rebasing || branchStatusLoading || isAttemptRunning
+                    }
+                    className="h-4 w-4 p-0 hover:bg-muted"
+                  >
+                    <Settings className="h-3 w-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Change base branch</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
           <div className="flex items-center gap-1.5">
             <GitBranchIcon className="h-3 w-3 text-muted-foreground" />
@@ -647,6 +659,49 @@ function CurrentAttempt({
           )}
         </div>
       </div>
+
+      {/* Rebase Dialog */}
+      <Dialog open={showRebaseDialog} onOpenChange={setShowRebaseDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rebase Task Attempt</DialogTitle>
+            <DialogDescription>
+              Choose a new base branch to rebase this task attempt onto.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="base-branch" className="text-sm font-medium">
+                Base Branch
+              </label>
+              <BranchSelector
+                branches={branches}
+                selectedBranch={selectedRebaseBranch}
+                onBranchSelect={setSelectedRebaseBranch}
+                placeholder="Select a base branch"
+                excludeCurrentBranch={false}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowRebaseDialog(false)}
+              disabled={rebasing}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRebaseDialogConfirm}
+              disabled={rebasing || !selectedRebaseBranch}
+            >
+              {rebasing ? 'Rebasing...' : 'Rebase'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

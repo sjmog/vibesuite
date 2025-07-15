@@ -1,8 +1,7 @@
 import { KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Textarea } from '@/components/ui/textarea';
-import { makeRequest } from '@/lib/api';
-import { ApiResponse } from 'shared/types.ts';
+import { AutoExpandingTextarea } from '@/components/ui/auto-expanding-textarea';
+import { projectsApi } from '@/lib/api';
 
 interface FileSearchResult {
   path: string;
@@ -18,6 +17,7 @@ interface FileSearchTextareaProps {
   className?: string;
   projectId?: string;
   onKeyDown?: (e: React.KeyboardEvent) => void;
+  maxRows?: number;
 }
 
 export function FileSearchTextarea({
@@ -29,6 +29,7 @@ export function FileSearchTextarea({
   className,
   projectId,
   onKeyDown,
+  maxRows = 10,
 }: FileSearchTextareaProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<FileSearchResult[]>([]);
@@ -51,19 +52,12 @@ export function FileSearchTextarea({
 
     const searchFiles = async () => {
       setIsLoading(true);
-      try {
-        const response = await makeRequest(
-          `/api/projects/${projectId}/search?q=${encodeURIComponent(searchQuery)}`
-        );
 
-        if (response.ok) {
-          const result: ApiResponse<FileSearchResult[]> = await response.json();
-          if (result.success && result.data) {
-            setSearchResults(result.data);
-            setShowDropdown(true);
-            setSelectedIndex(-1);
-          }
-        }
+      try {
+        const result = await projectsApi.searchFiles(projectId, searchQuery);
+        setSearchResults(result);
+        setShowDropdown(true);
+        setSelectedIndex(-1);
       } catch (error) {
         console.error('Failed to search files:', error);
       } finally {
@@ -238,7 +232,7 @@ export function FileSearchTextarea({
     <div
       className={`relative ${className?.includes('flex-1') ? 'flex-1' : ''}`}
     >
-      <Textarea
+      <AutoExpandingTextarea
         ref={textareaRef}
         value={value}
         onChange={handleChange}
@@ -247,6 +241,7 @@ export function FileSearchTextarea({
         rows={rows}
         disabled={disabled}
         className={className}
+        maxRows={maxRows}
       />
 
       {showDropdown &&

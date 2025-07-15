@@ -4,7 +4,7 @@
 
 export type ApiResponse<T> = { success: boolean, data: T | null, message: string | null, };
 
-export type Config = { theme: ThemeMode, executor: ExecutorConfig, disclaimer_acknowledged: boolean, onboarding_acknowledged: boolean, telemetry_acknowledged: boolean, sound_alerts: boolean, sound_file: SoundFile, push_notifications: boolean, editor: EditorConfig, github: GitHubConfig, analytics_enabled: boolean | null, };
+export type Config = { theme: ThemeMode, executor: ExecutorConfig, disclaimer_acknowledged: boolean, onboarding_acknowledged: boolean, github_login_acknowledged: boolean, telemetry_acknowledged: boolean, sound_alerts: boolean, sound_file: SoundFile, push_notifications: boolean, editor: EditorConfig, github: GitHubConfig, analytics_enabled: boolean | null, };
 
 export type ThemeMode = "light" | "dark" | "system" | "purple" | "green" | "blue" | "orange" | "red";
 
@@ -22,7 +22,7 @@ export type SoundConstants = { sound_files: Array<SoundFile>, sound_labels: Arra
 
 export type ConfigConstants = { editor: EditorConstants, sound: SoundConstants, };
 
-export type ExecutorConfig = { "type": "echo" } | { "type": "claude" } | { "type": "amp" } | { "type": "gemini" } | { "type": "opencode" };
+export type ExecutorConfig = { "type": "echo" } | { "type": "claude" } | { "type": "amp" } | { "type": "gemini" } | { "type": "setupscript", script: string, } | { "type": "charmopencode" };
 
 export type ExecutorConstants = { executor_types: Array<ExecutorConfig>, executor_labels: Array<string>, };
 
@@ -70,28 +70,11 @@ export type TaskAttemptActivityWithPrompt = { id: string, execution_process_id: 
 
 export type CreateTaskAttemptActivity = { execution_process_id: string, status: TaskAttemptStatus | null, note: string | null, };
 
-export type AttemptData = {
-    activities: TaskAttemptActivityWithPrompt[];
-    processes: ExecutionProcessSummary[];
-    runningProcessDetails: Record<string, ExecutionProcess>;
-}
-
-export interface ProcessedLine {
-    content: string;
-    chunkType: DiffChunkType;
-    oldLineNumber?: number;
-    newLineNumber?: number;
-}
-
-export interface ProcessedSection {
-    type: 'context' | 'change' | 'expanded';
-    lines: ProcessedLine[];
-    expandKey?: string;
-    expandedAbove?: boolean;
-    expandedBelow?: boolean;
-}
-
 export type DirectoryEntry = { name: string, path: string, is_directory: boolean, is_git_repo: boolean, };
+
+export type DirectoryListResponse = { entries: Array<DirectoryEntry>, current_path: string, };
+
+export type DeviceStartResponse = { device_code: string, user_code: string, verification_uri: string, expires_in: number, interval: number, };
 
 export type DiffChunkType = "Equal" | "Insert" | "Delete";
 
@@ -139,7 +122,7 @@ export const EXECUTOR_TYPES: string[] = [
     "claude",
     "amp",
     "gemini",
-    "opencode"
+    "charmopencode"
 ];
 
 export const EDITOR_TYPES: EditorType[] = [
@@ -156,7 +139,7 @@ export const EXECUTOR_LABELS: Record<string, string> = {
     "claude": "Claude",
     "amp": "Amp",
     "gemini": "Gemini",
-    "opencode": "OpenCode"
+    "charmopencode": "Charm Opencode"
 };
 
 export const EDITOR_LABELS: Record<string, string> = {

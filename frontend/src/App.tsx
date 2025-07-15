@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { Navbar } from '@/components/layout/navbar';
 import { Projects } from '@/pages/projects';
 import { ProjectTasks } from '@/pages/project-tasks';
@@ -11,19 +11,16 @@ import { OnboardingDialog } from '@/components/OnboardingDialog';
 import { PrivacyOptInDialog } from '@/components/PrivacyOptInDialog';
 import { ConfigProvider, useConfig } from '@/components/config-provider';
 import { ThemeProvider } from '@/components/theme-provider';
-import type {
-  Config,
-  ApiResponse,
-  ExecutorConfig,
-  EditorType,
-} from 'shared/types';
+import type { EditorType, ExecutorConfig } from 'shared/types';
+import { configApi } from '@/lib/api';
 import * as Sentry from '@sentry/react';
+import { Loader } from '@/components/ui/loader';
 import { GitHubLoginDialog } from '@/components/GitHubLoginDialog';
 
 const SentryRoutes = Sentry.withSentryReactRouterV6Routing(Routes);
 
 function AppContent() {
-  const { config, updateConfig, loading, githubTokenInvalid } = useConfig();
+  const { config, updateConfig, loading } = useConfig();
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showPrivacyOptIn, setShowPrivacyOptIn] = useState(false);
@@ -36,23 +33,15 @@ function AppContent() {
       if (config.disclaimer_acknowledged) {
         setShowOnboarding(!config.onboarding_acknowledged);
         if (config.onboarding_acknowledged) {
-          setShowPrivacyOptIn(!config.telemetry_acknowledged);
+          if (!config.github_login_acknowledged) {
+            setShowGitHubLogin(true);
+          } else if (!config.telemetry_acknowledged) {
+            setShowPrivacyOptIn(true);
+          }
         }
       }
-
-      // Only show GitHub login if telemetry dialog is not being shown
-      if (config.telemetry_acknowledged) {
-        const notAuthenticated =
-          !config.github?.username || !config.github?.token;
-        setShowGitHubLogin(notAuthenticated || githubTokenInvalid);
-      } else {
-        setShowGitHubLogin(false);
-      }
     }
-    if (githubTokenInvalid) {
-      setShowGitHubLogin(true);
-    }
-  }, [config, githubTokenInvalid]);
+  }, [config]);
 
   const handleDisclaimerAccept = async () => {
     if (!config) return;
@@ -60,20 +49,9 @@ function AppContent() {
     updateConfig({ disclaimer_acknowledged: true });
 
     try {
-      const response = await fetch('/api/config', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ ...config, disclaimer_acknowledged: true }),
-      });
-
-      const data: ApiResponse<Config> = await response.json();
-
-      if (data.success) {
-        setShowDisclaimer(false);
-        setShowOnboarding(!config.onboarding_acknowledged);
-      }
+      await configApi.saveConfig({ ...config, disclaimer_acknowledged: true });
+      setShowDisclaimer(false);
+      setShowOnboarding(!config.onboarding_acknowledged);
     } catch (err) {
       console.error('Error saving config:', err);
     }
@@ -95,19 +73,8 @@ function AppContent() {
     updateConfig(updatedConfig);
 
     try {
-      const response = await fetch('/api/config', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updatedConfig),
-      });
-
-      const data: ApiResponse<Config> = await response.json();
-
-      if (data.success) {
-        setShowOnboarding(false);
-      }
+      await configApi.saveConfig(updatedConfig);
+      setShowOnboarding(false);
     } catch (err) {
       console.error('Error saving config:', err);
     }
@@ -125,35 +92,42 @@ function AppContent() {
     updateConfig(updatedConfig);
 
     try {
-      const response = await fetch('/api/config', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updatedConfig),
-      });
-
-      const data: ApiResponse<Config> = await response.json();
-
-      if (data.success) {
-        setShowPrivacyOptIn(false);
-        // Now show GitHub login after privacy choice is made
-        const notAuthenticated =
-          !updatedConfig.github?.username || !updatedConfig.github?.token;
-        setShowGitHubLogin(notAuthenticated);
-      }
+      await configApi.saveConfig(updatedConfig);
+      setShowPrivacyOptIn(false);
     } catch (err) {
       console.error('Error saving config:', err);
+    }
+  };
+
+  const handleGitHubLoginComplete = async () => {
+    try {
+      // Refresh the config to get the latest GitHub authentication state
+      const latestConfig = await configApi.getConfig();
+      updateConfig(latestConfig);
+      setShowGitHubLogin(false);
+
+      // If user skipped (no GitHub token), we need to manually set the acknowledgment
+      if (!latestConfig.github?.token) {
+        const updatedConfig = {
+          ...latestConfig,
+          github_login_acknowledged: true,
+        };
+        updateConfig(updatedConfig);
+        await configApi.saveConfig(updatedConfig);
+      }
+    } catch (err) {
+      console.error('Error refreshing config:', err);
+    } finally {
+      if (!config?.telemetry_acknowledged) {
+        setShowPrivacyOptIn(true);
+      }
     }
   };
 
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-2 text-muted-foreground">Loading...</p>
-        </div>
+        <Loader message="Loading..." size={32} />
       </div>
     );
   }
@@ -163,7 +137,7 @@ function AppContent() {
       <div className="h-screen flex flex-col bg-background">
         <GitHubLoginDialog
           open={showGitHubLogin}
-          onOpenChange={setShowGitHubLogin}
+          onOpenChange={handleGitHubLoginComplete}
         />
         <DisclaimerDialog
           open={showDisclaimer}
