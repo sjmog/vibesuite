@@ -34,7 +34,9 @@ function AppContent() {
       if (config.disclaimer_acknowledged) {
         setShowOnboarding(!config.onboarding_acknowledged);
         if (config.onboarding_acknowledged) {
-          if (!config.github_login_acknowledged) {
+          // Only show GitHub login if not acknowledged AND not already authenticated
+          const isGitHubAuthenticated = !!(config.github?.username && config.github?.token);
+          if (!config.github_login_acknowledged && !isGitHubAuthenticated) {
             setShowGitHubLogin(true);
           } else if (!config.telemetry_acknowledged) {
             setShowPrivacyOptIn(true);
@@ -100,27 +102,30 @@ function AppContent() {
     }
   };
 
-  const handleGitHubLoginComplete = async () => {
-    try {
-      // Refresh the config to get the latest GitHub authentication state
-      const latestConfig = await configApi.getConfig();
-      updateConfig(latestConfig);
-      setShowGitHubLogin(false);
+  const handleGitHubLoginComplete = async (open: boolean) => {
+    // If the dialog is being closed (open = false)
+    if (!open) {
+      try {
+        // Refresh the config to get the latest GitHub authentication state
+        const latestConfig = await configApi.getConfig();
+        updateConfig(latestConfig);
+        setShowGitHubLogin(false);
 
-      // If user skipped (no GitHub token), we need to manually set the acknowledgment
-      if (!latestConfig.github?.token) {
-        const updatedConfig = {
-          ...latestConfig,
-          github_login_acknowledged: true,
-        };
-        updateConfig(updatedConfig);
-        await configApi.saveConfig(updatedConfig);
-      }
-    } catch (err) {
-      console.error('Error refreshing config:', err);
-    } finally {
-      if (!config?.telemetry_acknowledged) {
-        setShowPrivacyOptIn(true);
+        // If user skipped (no GitHub token), we need to manually set the acknowledgment
+        if (!latestConfig.github?.token) {
+          const updatedConfig = {
+            ...latestConfig,
+            github_login_acknowledged: true,
+          };
+          updateConfig(updatedConfig);
+          await configApi.saveConfig(updatedConfig);
+        }
+      } catch (err) {
+        console.error('Error refreshing config:', err);
+      } finally {
+        if (!config?.telemetry_acknowledged) {
+          setShowPrivacyOptIn(true);
+        }
       }
     }
   };
