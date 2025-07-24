@@ -25,21 +25,23 @@ export function TaskFollowUpSection() {
   const canSendFollowUp = useMemo(() => {
     if (
       !selectedAttempt ||
-      attemptData.activities.length === 0 ||
+      attemptData.processes.length === 0 ||
       isAttemptRunning ||
       isSendingFollowUp
     ) {
       return false;
     }
 
-    const codingAgentActivities = attemptData.activities.filter(
-      (activity) => activity.status === 'executorcomplete'
+    const completedOrKilledCodingAgentProcesses = attemptData.processes.filter(
+      (process) =>
+        process.process_type === 'codingagent' &&
+        (process.status === 'completed' || process.status === 'killed')
     );
 
-    return codingAgentActivities.length > 0;
+    return completedOrKilledCodingAgentProcesses.length > 0;
   }, [
     selectedAttempt,
-    attemptData.activities,
+    attemptData.processes,
     isAttemptRunning,
     isSendingFollowUp,
   ]);
@@ -80,7 +82,7 @@ export function TaskFollowUpSection() {
           )}
           <div className="flex gap-2 items-start">
             <FileSearchTextarea
-              placeholder="Ask a follow-up question... Type @ to search files."
+              placeholder="Continue working on this task... Type @ to search files."
               value={followUpMessage}
               onChange={(value) => {
                 setFollowUpMessage(value);

@@ -181,9 +181,11 @@ pub enum ExecutionState {
     SetupRunning,
     SetupComplete,
     SetupFailed,
+    SetupStopped,
     CodingAgentRunning,
     CodingAgentComplete,
     CodingAgentFailed,
+    CodingAgentStopped,
     Complete,
 }
 
@@ -500,37 +502,36 @@ impl TaskAttempt {
         .await?)
     }
 
-    pub async fn exists_for_task(
-        pool: &SqlitePool,
-        attempt_id: Uuid,
-        task_id: Uuid,
-        project_id: Uuid,
-    ) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query!(
-            "SELECT ta.id as \"id!: Uuid\" FROM task_attempts ta 
-             JOIN tasks t ON ta.task_id = t.id 
-             WHERE ta.id = $1 AND t.id = $2 AND t.project_id = $3",
-            attempt_id,
-            task_id,
-            project_id
-        )
-        .fetch_optional(pool)
-        .await?;
-        Ok(result.is_some())
-    }
-
     /// Perform the actual merge operation using GitService
     fn perform_merge_operation(
         worktree_path: &str,
         main_repo_path: &str,
         branch_name: &str,
+        base_branch: &str,
         task_title: &str,
+        task_description: &Option<String>,
+        task_id: Uuid,
     ) -> Result<String, TaskAttemptError> {
         let git_service = GitService::new(main_repo_path)?;
         let worktree_path = Path::new(worktree_path);
 
+        // Extract first section of UUID (before first hyphen)
+        let task_uuid_str = task_id.to_string();
+        let first_uuid_section = task_uuid_str.split('-').next().unwrap_or(&task_uuid_str);
+
+        // Create commit message with task title and description
+        let mut commit_message = format!("{} (vibe-kanban {})", task_title, first_uuid_section);
+
+        // Add description on next line if it exists
+        if let Some(description) = task_description {
+            if !description.trim().is_empty() {
+                commit_message.push_str("\n\n");
+                commit_message.push_str(description);
+            }
+        }
+
         git_service
-            .merge_changes(worktree_path, branch_name, task_title)
+            .merge_changes(worktree_path, branch_name, base_branch, &commit_message)
             .map_err(TaskAttemptError::from)
     }
 
@@ -539,12 +540,13 @@ impl TaskAttempt {
         worktree_path: &str,
         main_repo_path: &str,
         new_base_branch: Option<String>,
+        old_base_branch: String,
     ) -> Result<String, TaskAttemptError> {
         let git_service = GitService::new(main_repo_path)?;
         let worktree_path = Path::new(worktree_path);
 
         git_service
-            .rebase_branch(worktree_path, new_base_branch.as_deref())
+            .rebase_branch(worktree_path, new_base_branch.as_deref(), &old_base_branch)
             .map_err(TaskAttemptError::from)
     }
 
@@ -567,7 +569,10 @@ impl TaskAttempt {
             &worktree_path,
             &ctx.project.git_repo_path,
             &ctx.task_attempt.branch,
+            &ctx.task_attempt.base_branch,
             &ctx.task.title,
+            &ctx.task.description,
+            ctx.task.id,
         )?;
 
         // Update the task attempt with the merge commit
@@ -816,11 +821,11 @@ impl TaskAttempt {
         let worktree_path =
             Self::ensure_worktree_exists(pool, attempt_id, project_id, "rebase").await?;
 
-        // Perform the git rebase operations (synchronous)
         let new_base_commit = Self::perform_rebase_operation(
             &worktree_path,
             &ctx.project.git_repo_path,
             effective_base_branch.clone(),
+            ctx.task_attempt.base_branch.clone(),
         )?;
 
         // Update the database with the new base branch if it was changed
@@ -1021,7 +1026,7 @@ impl TaskAttempt {
                                 ExecutionState::CodingAgentFailed
                             }
                             crate::models::execution_process::ExecutionProcessStatus::Killed => {
-                                ExecutionState::CodingAgentFailed
+                                ExecutionState::CodingAgentStopped
                             }
                         }
                     } else {
@@ -1032,7 +1037,7 @@ impl TaskAttempt {
                     ExecutionState::SetupFailed
                 }
                 crate::models::execution_process::ExecutionProcessStatus::Killed => {
-                    ExecutionState::SetupFailed
+                    ExecutionState::SetupStopped
                 }
             }
         } else if let Some(agent) = coding_agent_process {
@@ -1048,7 +1053,7 @@ impl TaskAttempt {
                     ExecutionState::CodingAgentFailed
                 }
                 crate::models::execution_process::ExecutionProcessStatus::Killed => {
-                    ExecutionState::CodingAgentFailed
+                    ExecutionState::CodingAgentStopped
                 }
             }
         } else {

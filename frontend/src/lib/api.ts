@@ -2,27 +2,31 @@
 import {
   BranchStatus,
   Config,
+  ConfigConstants,
   CreateFollowUpAttempt,
   CreateProject,
+  CreateProjectFromGitHub,
   CreateTask,
   CreateTaskAndStart,
   CreateTaskAttempt,
+  CreateTaskTemplate,
   DeviceStartResponse,
   DirectoryEntry,
   type EditorType,
   ExecutionProcess,
   ExecutionProcessSummary,
   GitBranch,
-  NormalizedConversation,
+  ProcessLogsResponse,
   Project,
   ProjectWithBranch,
   Task,
   TaskAttempt,
-  TaskAttemptActivityWithPrompt,
   TaskAttemptState,
+  TaskTemplate,
   TaskWithAttemptStatus,
   UpdateProject,
   UpdateTask,
+  UpdateTaskTemplate,
   WorktreeDiff,
 } from 'shared/types';
 
@@ -44,6 +48,12 @@ export interface ApiResponse<T> {
   message?: string;
 }
 
+export interface FollowUpResponse {
+  message: string;
+  actual_attempt_id: string;
+  created_new_attempt: boolean;
+}
+
 // Additional interface for file search results
 export interface FileSearchResult {
   path: string;
@@ -54,6 +64,19 @@ export interface FileSearchResult {
 export interface DirectoryListResponse {
   entries: DirectoryEntry[];
   current_path: string;
+}
+
+// GitHub Repository Info (manually defined since not exported from Rust yet)
+export interface RepositoryInfo {
+  id: number;
+  name: string;
+  full_name: string;
+  owner: string;
+  description: string | null;
+  clone_url: string;
+  ssh_url: string;
+  default_branch: string;
+  private: boolean;
 }
 
 export class ApiError extends Error {
@@ -150,6 +173,7 @@ export const projectsApi = {
   openEditor: async (id: string): Promise<void> => {
     const response = await makeRequest(`/api/projects/${id}/open-editor`, {
       method: 'POST',
+      body: JSON.stringify(null),
     });
     return handleApiResponse<void>(response);
   },
@@ -175,6 +199,13 @@ export const tasksApi = {
   getAll: async (projectId: string): Promise<TaskWithAttemptStatus[]> => {
     const response = await makeRequest(`/api/projects/${projectId}/tasks`);
     return handleApiResponse<TaskWithAttemptStatus[]>(response);
+  },
+
+  getById: async (projectId: string, taskId: string): Promise<Task> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/tasks/${taskId}`
+    );
+    return handleApiResponse<Task>(response);
   },
 
   create: async (projectId: string, data: CreateTask): Promise<Task> => {
@@ -222,6 +253,17 @@ export const tasksApi = {
       }
     );
     return handleApiResponse<void>(response);
+  },
+
+  getChildren: async (
+    projectId: string,
+    taskId: string,
+    attemptId: string
+  ): Promise<Task[]> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/tasks/${taskId}/attempts/${attemptId}/children`
+    );
+    return handleApiResponse<Task[]>(response);
   },
 };
 
@@ -288,17 +330,6 @@ export const attemptsApi = {
       }
     );
     return handleApiResponse<void>(response);
-  },
-
-  getActivities: async (
-    projectId: string,
-    taskId: string,
-    attemptId: string
-  ): Promise<TaskAttemptActivityWithPrompt[]> => {
-    const response = await makeRequest(
-      `/api/projects/${projectId}/tasks/${taskId}/attempts/${attemptId}/activities`
-    );
-    return handleApiResponse<TaskAttemptActivityWithPrompt[]>(response);
   },
 
   getDiff: async (
@@ -450,28 +481,29 @@ export const attemptsApi = {
     );
     return handleApiResponse<void>(response);
   },
+
+  getDetails: async (attemptId: string): Promise<TaskAttempt> => {
+    const response = await makeRequest(`/api/attempts/${attemptId}/details`);
+    return handleApiResponse<TaskAttempt>(response);
+  },
+
+  getAllLogs: async (
+    projectId: string,
+    taskId: string,
+    attemptId: string
+  ): Promise<ProcessLogsResponse[]> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/tasks/${taskId}/attempts/${attemptId}/logs`
+    );
+    return handleApiResponse(response);
+  },
 };
 
 // Execution Process APIs
 export const executionProcessesApi = {
-  getDetails: async (
-    projectId: string,
-    processId: string
-  ): Promise<ExecutionProcess> => {
-    const response = await makeRequest(
-      `/api/projects/${projectId}/execution-processes/${processId}`
-    );
+  getDetails: async (processId: string): Promise<ExecutionProcess> => {
+    const response = await makeRequest(`/api/execution-processes/${processId}`);
     return handleApiResponse<ExecutionProcess>(response);
-  },
-
-  getNormalizedLogs: async (
-    projectId: string,
-    processId: string
-  ): Promise<NormalizedConversation> => {
-    const response = await makeRequest(
-      `/api/projects/${projectId}/execution-processes/${processId}/normalized-logs`
-    );
-    return handleApiResponse<NormalizedConversation>(response);
   },
 };
 
@@ -496,6 +528,10 @@ export const configApi = {
       body: JSON.stringify(config),
     });
     return handleApiResponse<Config>(response);
+  },
+  getConstants: async (): Promise<ConfigConstants> => {
+    const response = await makeRequest('/api/config/constants');
+    return handleApiResponse<ConfigConstants>(response);
   },
 };
 
@@ -527,6 +563,74 @@ export const githubAuthApi = {
       headers: { 'Content-Type': 'application/json' },
     });
     return handleApiResponse<string>(response);
+  },
+};
+
+// GitHub APIs (only available in cloud mode)
+export const githubApi = {
+  listRepositories: async (page: number = 1): Promise<RepositoryInfo[]> => {
+    const response = await makeRequest(`/api/github/repositories?page=${page}`);
+    return handleApiResponse<RepositoryInfo[]>(response);
+  },
+  createProjectFromRepository: async (
+    data: CreateProjectFromGitHub
+  ): Promise<Project> => {
+    const response = await makeRequest('/api/projects/from-github', {
+      method: 'POST',
+      body: JSON.stringify(data, (_key, value) =>
+        typeof value === 'bigint' ? Number(value) : value
+      ),
+    });
+    return handleApiResponse<Project>(response);
+  },
+};
+
+// Task Templates APIs
+export const templatesApi = {
+  list: async (): Promise<TaskTemplate[]> => {
+    const response = await makeRequest('/api/templates');
+    return handleApiResponse<TaskTemplate[]>(response);
+  },
+
+  listGlobal: async (): Promise<TaskTemplate[]> => {
+    const response = await makeRequest('/api/templates/global');
+    return handleApiResponse<TaskTemplate[]>(response);
+  },
+
+  listByProject: async (projectId: string): Promise<TaskTemplate[]> => {
+    const response = await makeRequest(`/api/projects/${projectId}/templates`);
+    return handleApiResponse<TaskTemplate[]>(response);
+  },
+
+  get: async (templateId: string): Promise<TaskTemplate> => {
+    const response = await makeRequest(`/api/templates/${templateId}`);
+    return handleApiResponse<TaskTemplate>(response);
+  },
+
+  create: async (data: CreateTaskTemplate): Promise<TaskTemplate> => {
+    const response = await makeRequest('/api/templates', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    return handleApiResponse<TaskTemplate>(response);
+  },
+
+  update: async (
+    templateId: string,
+    data: UpdateTaskTemplate
+  ): Promise<TaskTemplate> => {
+    const response = await makeRequest(`/api/templates/${templateId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+    return handleApiResponse<TaskTemplate>(response);
+  },
+
+  delete: async (templateId: string): Promise<void> => {
+    const response = await makeRequest(`/api/templates/${templateId}`, {
+      method: 'DELETE',
+    });
+    return handleApiResponse<void>(response);
   },
 };
 

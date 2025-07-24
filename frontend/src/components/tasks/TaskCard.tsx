@@ -1,4 +1,6 @@
+import { KeyboardEvent, useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,14 +9,15 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { KanbanCard } from '@/components/ui/shadcn-io/kanban';
 import {
-  MoreHorizontal,
-  Trash2,
+  CheckCircle,
   Edit,
   Loader2,
-  CheckCircle,
+  MoreHorizontal,
+  Trash2,
   XCircle,
 } from 'lucide-react';
 import type { TaskWithAttemptStatus, ProjectPersonaWithTemplate } from 'shared/types';
+import { is_planning_executor_type } from '@/lib/utils';
 
 type Task = TaskWithAttemptStatus;
 
@@ -26,6 +29,8 @@ interface TaskCardProps {
   onEdit: (task: Task) => void;
   onDelete: (taskId: string) => void;
   onViewDetails: (task: Task) => void;
+  isFocused: boolean;
+  tabIndex?: number;
 }
 
 export function TaskCard({
@@ -36,9 +41,34 @@ export function TaskCard({
   onEdit,
   onDelete,
   onViewDetails,
+  isFocused,
+  tabIndex = -1,
 }: TaskCardProps) {
   // Find the assigned persona
   const assignedPersona = personas.find(p => p.id === task.assigned_persona_id);
+  const localRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (isFocused && localRef.current) {
+      localRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      localRef.current.focus();
+    }
+  }, [isFocused]);
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === 'Backspace') {
+        onDelete(task.id);
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        onViewDetails(task);
+      }
+    },
+    [task, onDelete, onViewDetails]
+  );
+
+  const handleClick = useCallback(() => {
+    onViewDetails(task);
+  }, [task, onViewDetails]);
+
   return (
     <KanbanCard
       key={task.id}
@@ -46,12 +76,25 @@ export function TaskCard({
       name={task.title}
       index={index}
       parent={status}
-      onClick={() => onViewDetails(task)}
+      onClick={handleClick}
+      tabIndex={tabIndex}
+      forwardedRef={localRef}
+      onKeyDown={handleKeyDown}
     >
       <div className="space-y-2">
         <div className="flex items-start justify-between">
           <div className="flex-1 pr-2">
-            <h4 className="font-medium text-sm break-words">{task.title}</h4>
+            <div className="mb-1">
+              <h4 className="font-medium text-sm break-words">
+                {task.latest_attempt_executor &&
+                  is_planning_executor_type(task.latest_attempt_executor) && (
+                    <Badge className="bg-blue-600 text-white hover:bg-blue-700 text-xs font-medium px-1.5 py-0.5 h-4 text-[10px] mr-1">
+                      PLAN
+                    </Badge>
+                  )}
+                {task.title}
+              </h4>
+            </div>
           </div>
           <div className="flex items-center space-x-1">
             {/* In Progress Spinner */}
@@ -63,7 +106,7 @@ export function TaskCard({
               <CheckCircle className="h-3 w-3 text-green-500" />
             )}
             {/* Failed Indicator */}
-            {task.has_failed_attempt && !task.has_merged_attempt && (
+            {task.last_attempt_failed && !task.has_merged_attempt && (
               <XCircle className="h-3 w-3 text-red-500" />
             )}
             {/* Actions Menu */}
@@ -71,6 +114,7 @@ export function TaskCard({
               onPointerDown={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
             >
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
