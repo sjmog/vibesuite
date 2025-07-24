@@ -14,7 +14,7 @@ import {
   CheckCircle,
   XCircle,
 } from 'lucide-react';
-import type { TaskWithAttemptStatus } from 'shared/types';
+import type { TaskWithAttemptStatus, ProjectPersonaWithTemplate } from 'shared/types';
 
 type Task = TaskWithAttemptStatus;
 
@@ -22,6 +22,7 @@ interface TaskCardProps {
   task: Task;
   index: number;
   status: string;
+  personas?: ProjectPersonaWithTemplate[];
   onEdit: (task: Task) => void;
   onDelete: (taskId: string) => void;
   onViewDetails: (task: Task) => void;
@@ -31,10 +32,13 @@ export function TaskCard({
   task,
   index,
   status,
+  personas = [],
   onEdit,
   onDelete,
   onViewDetails,
 }: TaskCardProps) {
+  // Find the assigned persona
+  const assignedPersona = personas.find(p => p.id === task.assigned_persona_id);
   return (
     <KanbanCard
       key={task.id}
@@ -102,6 +106,13 @@ export function TaskCard({
                 ? `${task.description.substring(0, 130)}...`
                 : task.description}
             </p>
+          </div>
+        )}
+        {assignedPersona && (
+          <div className="mt-2">
+            <span className="text-xs text-muted-foreground">
+              Assigned to: {assignedPersona.custom_name || assignedPersona.template_name}
+            </span>
           </div>
         )}
       </div>

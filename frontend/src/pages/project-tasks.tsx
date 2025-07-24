@@ -22,8 +22,11 @@ import type {
   ProjectWithBranch,
   TaskStatus,
   TaskWithAttemptStatus,
+  ProjectPersonaWithTemplate,
+  ApiResponse,
 } from 'shared/types';
 import type { DragEndEvent } from '@/components/ui/shadcn-io/kanban';
+import { makeRequest } from '@/lib/api';
 
 type Task = TaskWithAttemptStatus;
 
@@ -41,6 +44,7 @@ export function ProjectTasks() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isProjectSettingsOpen, setIsProjectSettingsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [personas, setPersonas] = useState<ProjectPersonaWithTemplate[]>([]);
 
   // Panel state
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -76,6 +80,7 @@ export function ProjectTasks() {
     if (projectId) {
       fetchProject();
       fetchTasks();
+      fetchPersonas();
 
       // Set up polling to refresh tasks every 5 seconds
       const interval = setInterval(() => {
@@ -109,6 +114,21 @@ export function ProjectTasks() {
       setError('Failed to load project');
     }
   }, [projectId, navigate]);
+
+  const fetchPersonas = useCallback(async () => {
+    if (!projectId) return;
+    
+    try {
+      const response = await makeRequest(`/api/personas/projects/${projectId}/personas`);
+      const data: ApiResponse<ProjectPersonaWithTemplate[]> = await response.json();
+      
+      if (data.success && data.data) {
+        setPersonas(data.data.filter(p => p.is_active));
+      }
+    } catch (err) {
+      console.error('Failed to load personas:', err);
+    }
+  }, [projectId]);
 
   const fetchTasks = useCallback(
     async (skipLoading = false) => {
@@ -150,12 +170,13 @@ export function ProjectTasks() {
   );
 
   const handleCreateTask = useCallback(
-    async (title: string, description: string) => {
+    async (title: string, description: string, assignedPersonaId: string | null) => {
       try {
         const createdTask = await tasksApi.create(projectId!, {
           project_id: projectId!,
           title,
           description: description || null,
+          assigned_persona_id: assignedPersonaId,
         });
         await fetchTasks();
         // Open the newly created task in the details panel
@@ -170,7 +191,7 @@ export function ProjectTasks() {
   );
 
   const handleCreateAndStartTask = useCallback(
-    async (title: string, description: string, executor?: ExecutorConfig) => {
+    async (title: string, description: string, executor?: ExecutorConfig, assignedPersonaId?: string | null) => {
       try {
         const payload: CreateTaskAndStart = {
           project_id: projectId!,
@@ -179,6 +200,17 @@ export function ProjectTasks() {
           executor: executor || null,
         };
         const result = await tasksApi.createAndStart(projectId!, payload);
+        
+        // If a persona was assigned, update the task with the assignment
+        if (assignedPersonaId && result.id) {
+          await tasksApi.update(projectId!, result.id, {
+            title: null,
+            description: null,
+            status: null,
+            assigned_persona_id: assignedPersonaId,
+          });
+        }
+        
         await fetchTasks();
         // Open the newly created task in the details panel
         handleViewTaskDetails(result);
@@ -190,7 +222,7 @@ export function ProjectTasks() {
   );
 
   const handleUpdateTask = useCallback(
-    async (title: string, description: string, status: TaskStatus) => {
+    async (title: string, description: string, status: TaskStatus, assignedPersonaId: string | null) => {
       if (!editingTask) return;
 
       try {
@@ -198,6 +230,7 @@ export function ProjectTasks() {
           title,
           description: description || null,
           status,
+          assigned_persona_id: assignedPersonaId,
         });
         await fetchTasks();
         setEditingTask(null);
@@ -272,6 +305,7 @@ export function ProjectTasks() {
           title: task.title,
           description: task.description,
           status: newStatus,
+          assigned_persona_id: null, // Keep existing assignment when dragging
         });
       } catch (err) {
         // Revert the optimistic update if the API call failed
@@ -363,6 +397,7 @@ export function ProjectTasks() {
               <TaskKanbanBoard
                 tasks={tasks}
                 searchQuery={searchQuery}
+                personas={personas}
                 onDragEnd={handleDragEnd}
                 onEditTask={handleEditTask}
                 onDeleteTask={handleDeleteTask}

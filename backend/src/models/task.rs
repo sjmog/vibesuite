@@ -69,7 +69,7 @@ pub struct UpdateTask {
     pub title: Option<String>,
     pub description: Option<String>,
     pub status: Option<TaskStatus>,
-    pub assigned_persona_id: Option<Uuid>,
+    pub assigned_persona_id: Option<Option<Uuid>>,
 }
 
 impl Task {
@@ -271,6 +271,33 @@ impl Task {
             title,
             description,
             status_value
+        )
+        .fetch_one(pool)
+        .await
+    }
+
+    pub async fn update_with_persona(
+        pool: &SqlitePool,
+        id: Uuid,
+        project_id: Uuid,
+        title: String,
+        description: Option<String>,
+        status: TaskStatus,
+        assigned_persona_id: Option<Uuid>,
+    ) -> Result<Self, sqlx::Error> {
+        let status_value = status as TaskStatus;
+        sqlx::query_as!(
+            Task,
+            r#"UPDATE tasks 
+               SET title = $3, description = $4, status = $5, assigned_persona_id = $6 
+               WHERE id = $1 AND project_id = $2 
+               RETURNING id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>", assigned_persona_id as "assigned_persona_id?: Uuid""#,
+            id,
+            project_id,
+            title,
+            description,
+            status_value,
+            assigned_persona_id
         )
         .fetch_one(pool)
         .await

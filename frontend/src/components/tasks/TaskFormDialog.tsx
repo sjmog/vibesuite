@@ -17,7 +17,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useConfig } from '@/components/config-provider';
-import type { TaskStatus, ExecutorConfig } from 'shared/types';
+import { makeRequest } from '@/lib/api';
+import type { TaskStatus, ExecutorConfig, ProjectPersonaWithTemplate, ApiResponse } from 'shared/types';
 
 interface Task {
   id: string;
@@ -27,6 +28,7 @@ interface Task {
   status: TaskStatus;
   created_at: string;
   updated_at: string;
+  assigned_persona_id: string | null;
 }
 
 interface TaskFormDialogProps {
@@ -34,16 +36,18 @@ interface TaskFormDialogProps {
   onOpenChange: (open: boolean) => void;
   task?: Task | null; // Optional for create mode
   projectId?: string; // For file search functionality
-  onCreateTask?: (title: string, description: string) => Promise<void>;
+  onCreateTask?: (title: string, description: string, assignedPersonaId: string | null) => Promise<void>;
   onCreateAndStartTask?: (
     title: string,
     description: string,
-    executor?: ExecutorConfig
+    executor?: ExecutorConfig,
+    assignedPersonaId?: string | null
   ) => Promise<void>;
   onUpdateTask?: (
     title: string,
     description: string,
-    status: TaskStatus
+    status: TaskStatus,
+    assignedPersonaId: string | null
   ) => Promise<void>;
 }
 
@@ -59,8 +63,11 @@ export function TaskFormDialog({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState<TaskStatus>('todo');
+  const [assignedPersonaId, setAssignedPersonaId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmittingAndStart, setIsSubmittingAndStart] = useState(false);
+  const [personas, setPersonas] = useState<ProjectPersonaWithTemplate[]>([]);
+  const [loadingPersonas, setLoadingPersonas] = useState(false);
 
   const { config } = useConfig();
   const isEditMode = Boolean(task);
@@ -71,13 +78,56 @@ export function TaskFormDialog({
       setTitle(task.title);
       setDescription(task.description || '');
       setStatus(task.status);
+      setAssignedPersonaId(task.assigned_persona_id);
     } else {
       // Create mode - reset to defaults
       setTitle('');
       setDescription('');
       setStatus('todo');
+      setAssignedPersonaId(null);
     }
   }, [task, isOpen]);
+
+  // Fetch personas when dialog opens
+  useEffect(() => {
+    if (isOpen && projectId) {
+      fetchPersonas();
+    }
+  }, [isOpen, projectId]);
+
+  const fetchPersonas = async () => {
+    if (!projectId) return;
+    
+    setLoadingPersonas(true);
+    try {
+      const response = await makeRequest(`/api/personas/projects/${projectId}/personas`);
+      const data: ApiResponse<ProjectPersonaWithTemplate[]> = await response.json();
+      
+      if (data.success && data.data) {
+        const activePersonas = data.data.filter(p => p.is_active);
+        setPersonas(activePersonas);
+        
+        // Set default persona to PM if available and not in edit mode
+        if (!task && assignedPersonaId === null && activePersonas.length > 0) {
+          // Look for PM persona by checking template name or custom name
+          const pmPersona = activePersonas.find(p => 
+            p.template_name?.toLowerCase().includes('pm') ||
+            p.template_name?.toLowerCase().includes('project manager') ||
+            p.custom_name?.toLowerCase().includes('pm') ||
+            p.custom_name?.toLowerCase().includes('project manager')
+          );
+          
+          if (pmPersona) {
+            setAssignedPersonaId(pmPersona.id);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load personas:', err);
+    } finally {
+      setLoadingPersonas(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!title.trim()) return;
@@ -85,9 +135,9 @@ export function TaskFormDialog({
     setIsSubmitting(true);
     try {
       if (isEditMode && onUpdateTask) {
-        await onUpdateTask(title, description, status);
+        await onUpdateTask(title, description, status, assignedPersonaId);
       } else if (!isEditMode && onCreateTask) {
-        await onCreateTask(title, description);
+        await onCreateTask(title, description, assignedPersonaId);
       }
 
       // Reset form on successful creation
@@ -95,6 +145,7 @@ export function TaskFormDialog({
         setTitle('');
         setDescription('');
         setStatus('todo');
+        setAssignedPersonaId(null);
       }
 
       onOpenChange(false);
@@ -109,13 +160,14 @@ export function TaskFormDialog({
     setIsSubmittingAndStart(true);
     try {
       if (!isEditMode && onCreateAndStartTask) {
-        await onCreateAndStartTask(title, description, config?.executor);
+        await onCreateAndStartTask(title, description, config?.executor, assignedPersonaId);
       }
 
       // Reset form on successful creation
       setTitle('');
       setDescription('');
       setStatus('todo');
+      setAssignedPersonaId(null);
 
       onOpenChange(false);
     } finally {
@@ -125,6 +177,7 @@ export function TaskFormDialog({
     title,
     description,
     config?.executor,
+    assignedPersonaId,
     isEditMode,
     onCreateAndStartTask,
     onOpenChange,
@@ -136,10 +189,12 @@ export function TaskFormDialog({
       setTitle(task.title);
       setDescription(task.description || '');
       setStatus(task.status);
+      setAssignedPersonaId(task.assigned_persona_id);
     } else {
       setTitle('');
       setDescription('');
       setStatus('todo');
+      setAssignedPersonaId(null);
     }
     onOpenChange(false);
   }, [task, onOpenChange]);
@@ -224,6 +279,30 @@ export function TaskFormDialog({
               disabled={isSubmitting || isSubmittingAndStart}
               projectId={projectId}
             />
+          </div>
+
+          <div>
+            <Label htmlFor="task-persona">Assign to Persona</Label>
+            <Select
+              value={assignedPersonaId || 'unassigned'}
+              onValueChange={(value) => setAssignedPersonaId(value === 'unassigned' ? null : value)}
+              disabled={isSubmitting || isSubmittingAndStart || loadingPersonas}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a persona" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
+                {personas.map((persona) => (
+                  <SelectItem key={persona.id} value={persona.id}>
+                    {persona.custom_name || persona.template_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {loadingPersonas && (
+              <p className="text-sm text-muted-foreground mt-1">Loading personas...</p>
+            )}
           </div>
 
           {isEditMode && (
