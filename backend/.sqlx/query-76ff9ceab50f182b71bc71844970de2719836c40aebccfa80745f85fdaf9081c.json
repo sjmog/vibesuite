@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT professionalism_points, quality_points \n               FROM scoring_rules \n               WHERE action_type = $1 AND task_size = $2",
+  "describe": {
+    "columns": [
+      {
+        "name": "professionalism_points",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "quality_points",
+        "ordinal": 1,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "76ff9ceab50f182b71bc71844970de2719836c40aebccfa80745f85fdaf9081c"
+}

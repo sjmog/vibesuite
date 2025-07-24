@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE project_personas \n               SET professionalism_score = professionalism_score + $1,\n                   quality_score = quality_score + $2,\n                   updated_at = datetime('now', 'subsec')\n               WHERE id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "c7f76c616cd106b9e2774e4c2bf93b395f0dd09026d0bc3a93dae9b1fc365b61"
+}

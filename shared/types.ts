@@ -170,3 +170,219 @@ export const SOUND_LABELS: Record<string, string> = {
     "phone-vibration": "Phone Vibration",
     "rooster": "Rooster Call"
 };
+
+// Persona System Types
+export type RoleType = "pm" | "requirements_engineer" | "architect" | "developer" | "user_role" | "system_engineer" | "devops_engineer" | "database_engineer" | "security_engineer" | "ai_engineer" | "web_designer" | "qa_engineer" | "frontend_tester" | "backend_tester" | "specialist";
+
+export type CapabilityCategory = "implementation" | "testing" | "architecture" | "security" | "design" | "devops" | "database" | "ai_ml" | "qa" | "management" | "analysis";
+
+export type ActivityType = "task_assigned" | "task_completed" | "task_failed" | "kudos_received" | "wtf_received" | "process_violation" | "quality_issue" | "imported" | "score_adjustment" | "delegation" | "peer_review";
+
+export type ActionCategory = "file_operation" | "tool_usage" | "task_management" | "team_interaction" | "process_action" | "git_operation";
+
+export type ActionType = "file_read" | "file_write" | "file_edit" | "file_delete" | "bash_command" | "git_commit" | "git_branch" | "git_pr" | "search_query" | "api_call" | "task_assigned" | "task_started" | "task_completed" | "task_delegated" | "kudos_given" | "wtf_issued" | "peer_review" | "collaboration" | "tests_run" | "build_executed";
+
+export type ResultStatus = "success" | "failure" | "partial" | "cancelled";
+
+export type ArtifactType = "file_change" | "command_output" | "git_diff" | "api_response" | "test_result" | "build_artifact";
+
+export type TaskSize = "small" | "standard";
+
+export type Capability = { 
+    id: string, 
+    name: string, 
+    category: CapabilityCategory, 
+    description: string, 
+    keywords: string, 
+    created_at: string 
+};
+
+export type PersonaTemplate = { 
+    id: string, 
+    name: string, 
+    role_type: RoleType, 
+    default_instructions: string, 
+    description: string, 
+    capabilities: string, 
+    tool_restrictions: string, 
+    automation_triggers: string, 
+    kudos_quota_daily: bigint, 
+    is_system: boolean, 
+    created_at: string, 
+    updated_at: string 
+};
+
+export type ProjectPersona = { 
+    id: string, 
+    project_id: string, 
+    template_id: string, 
+    custom_name: string | null, 
+    custom_instructions: string | null, 
+    is_active: boolean, 
+    professionalism_score: number, 
+    quality_score: number, 
+    kudos_quota_used: bigint, 
+    wtf_quota_used: bigint, 
+    last_quota_reset: string, 
+    imported_from_project_id: string | null, 
+    imported_at: string | null, 
+    created_at: string, 
+    updated_at: string 
+};
+
+export type ScoringRule = { 
+    id: string, 
+    action_type: string, 
+    task_size: TaskSize, 
+    professionalism_points: number, 
+    quality_points: number, 
+    description: string 
+};
+
+export type PersonaActivity = { 
+    id: string, 
+    project_persona_id: string, 
+    task_id: string | null, 
+    activity_type: ActivityType, 
+    description: string, 
+    professionalism_change: number, 
+    quality_change: number, 
+    task_size: TaskSize, 
+    metadata: string | null, 
+    created_at: string 
+};
+
+export type PersonaAction = { 
+    id: string, 
+    project_persona_id: string, 
+    task_id: string | null, 
+    activity_id: string | null, 
+    action_type: ActionType, 
+    action_category: ActionCategory, 
+    tool_name: string | null, 
+    parameters: string | null, 
+    result_status: ResultStatus, 
+    execution_time_ms: bigint | null, 
+    description: string, 
+    created_at: string 
+};
+
+export type ActionArtifact = { 
+    id: string, 
+    action_id: string, 
+    artifact_type: ArtifactType, 
+    file_path: string | null, 
+    content_before: string | null, 
+    content_after: string | null, 
+    git_hash: string | null, 
+    output_data: string | null, 
+    size_bytes: bigint | null, 
+    created_at: string 
+};
+
+export type LearningEvent = { 
+    id: string, 
+    project_persona_id: string | null, 
+    event_type: string, 
+    category: string, 
+    insight: string, 
+    relevance_score: number, 
+    metadata: string | null, 
+    created_at: string, 
+    expires_at: string | null 
+};
+
+// DTO types for API operations
+export type CreatePersonaTemplate = { 
+    name: string, 
+    role_type: RoleType, 
+    default_instructions: string, 
+    description: string, 
+    capabilities: Array<string>, 
+    tool_restrictions: Array<string>, 
+    automation_triggers: Array<string>, 
+    kudos_quota_daily: bigint 
+};
+
+export type CreateProjectPersona = { 
+    project_id: string, 
+    template_id: string, 
+    custom_name: string | null, 
+    custom_instructions: string | null 
+};
+
+export type UpdateProjectPersona = { 
+    custom_name: string | null, 
+    custom_instructions: string | null, 
+    is_active: boolean | null 
+};
+
+export type CreatePersonaActivity = { 
+    project_persona_id: string, 
+    task_id: string | null, 
+    activity_type: ActivityType, 
+    description: string, 
+    task_size: TaskSize, 
+    metadata: string | null 
+};
+
+export type CreatePersonaAction = { 
+    project_persona_id: string, 
+    task_id: string | null, 
+    activity_id: string | null, 
+    action_type: ActionType, 
+    action_category: ActionCategory, 
+    tool_name: string | null, 
+    parameters: string | null, 
+    description: string 
+};
+
+// Enriched types with joined data
+export type ProjectPersonaWithTemplate = { 
+    id: string, 
+    project_id: string, 
+    template_id: string, 
+    template_name: string, 
+    template_role_type: RoleType, 
+    template_description: string, 
+    custom_name: string | null, 
+    custom_instructions: string | null, 
+    is_active: boolean, 
+    professionalism_score: number, 
+    quality_score: number, 
+    kudos_quota_used: bigint, 
+    wtf_quota_used: bigint, 
+    last_quota_reset: string, 
+    created_at: string, 
+    updated_at: string 
+};
+
+export type PersonaActivityWithTask = { 
+    id: string, 
+    project_persona_id: string, 
+    task_id: string | null, 
+    task_title: string | null, 
+    activity_type: ActivityType, 
+    description: string, 
+    professionalism_change: number, 
+    quality_change: number, 
+    task_size: TaskSize, 
+    metadata: string | null, 
+    created_at: string 
+};
+
+export type PersonaActionWithArtifacts = { 
+    id: string, 
+    project_persona_id: string, 
+    task_id: string | null, 
+    activity_id: string | null, 
+    action_type: ActionType, 
+    action_category: ActionCategory, 
+    tool_name: string | null, 
+    parameters: string | null, 
+    result_status: ResultStatus, 
+    execution_time_ms: bigint | null, 
+    description: string, 
+    created_at: string, 
+    artifacts: Array<ActionArtifact> 
+};

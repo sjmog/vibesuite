@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO persona_actions (\n                id, project_persona_id, task_id, activity_id, action_type,\n                action_category, tool_name, parameters, result_status,\n                execution_time_ms, description\n            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'success', NULL, $9)\n            RETURNING \n                id as \"id!: Uuid\",\n                project_persona_id as \"project_persona_id!: Uuid\",\n                task_id as \"task_id?: Uuid\",\n                activity_id as \"activity_id?: Uuid\",\n                action_type as \"action_type!: ActionType\",\n                action_category as \"action_category!: ActionCategory\",\n                tool_name,\n                parameters,\n                result_status as \"result_status!: ResultStatus\",\n                execution_time_ms,\n                description,\n                created_at as \"created_at!: DateTime<Utc>\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "project_persona_id!: Uuid",
+        "ordinal": 1,
+        "type_info": "Blob"
+      },
+      {
+        "name": "task_id?: Uuid",
+        "ordinal": 2,
+        "type_info": "Blob"
+      },
+      {
+        "name": "activity_id?: Uuid",
+        "ordinal": 3,
+        "type_info": "Blob"
+      },
+      {
+        "name": "action_type!: ActionType",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "action_category!: ActionCategory",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "tool_name",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "parameters",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "result_status!: ResultStatus",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "execution_time_ms",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "description",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!: DateTime<Utc>",
+        "ordinal": 11,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "d06247efd89d33099c906b70ee0e189f5411c93590d86c3526e9aa2e8c621b3a"
+}

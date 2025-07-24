@@ -142,6 +142,7 @@ pub async fn create_task_and_start(
         project_id: payload.project_id,
         title: payload.title.clone(),
         description: payload.description.clone(),
+        assigned_persona_id: None, // Will be set later for CreateTaskAndStart
     };
     let task = match Task::create(&app_state.db_pool, &create_task_payload, task_id).await {
         Ok(task) => task,

@@ -26,6 +26,7 @@ pub struct Task {
     pub status: TaskStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub assigned_persona_id: Option<Uuid>, // Foreign key to ProjectPersona
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -38,6 +39,7 @@ pub struct TaskWithAttemptStatus {
     pub status: TaskStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub assigned_persona_id: Option<Uuid>,
     pub has_in_progress_attempt: bool,
     pub has_merged_attempt: bool,
     pub has_failed_attempt: bool,
@@ -49,6 +51,7 @@ pub struct CreateTask {
     pub project_id: Uuid,
     pub title: String,
     pub description: Option<String>,
+    pub assigned_persona_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, TS)]
@@ -66,6 +69,7 @@ pub struct UpdateTask {
     pub title: Option<String>,
     pub description: Option<String>,
     pub status: Option<TaskStatus>,
+    pub assigned_persona_id: Option<Uuid>,
 }
 
 impl Task {
@@ -82,6 +86,7 @@ impl Task {
                 t.status              AS "status!: TaskStatus", 
                 t.created_at          AS "created_at!: DateTime<Utc>", 
                 t.updated_at          AS "updated_at!: DateTime<Utc>",
+                t.assigned_persona_id AS "assigned_persona_id?: Uuid",
                 CASE 
                 WHEN in_progress_attempts.task_id IS NOT NULL THEN true 
                 ELSE false 
@@ -186,6 +191,7 @@ impl Task {
                 status: record.status,
                 created_at: record.created_at,
                 updated_at: record.updated_at,
+                assigned_persona_id: record.assigned_persona_id,
                 has_in_progress_attempt: record.has_in_progress_attempt != 0,
                 has_merged_attempt: record.has_merged_attempt != 0,
                 has_failed_attempt: record.has_failed_attempt != 0,
@@ -198,7 +204,7 @@ impl Task {
     pub async fn find_by_id(pool: &SqlitePool, id: Uuid) -> Result<Option<Self>, sqlx::Error> {
         sqlx::query_as!(
             Task,
-            r#"SELECT id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>"
+            r#"SELECT id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>", assigned_persona_id as "assigned_persona_id?: Uuid"
                FROM tasks 
                WHERE id = $1"#,
             id
@@ -214,7 +220,7 @@ impl Task {
     ) -> Result<Option<Self>, sqlx::Error> {
         sqlx::query_as!(
             Task,
-            r#"SELECT id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>"
+            r#"SELECT id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>", assigned_persona_id as "assigned_persona_id?: Uuid"
                FROM tasks 
                WHERE id = $1 AND project_id = $2"#,
             id,
@@ -231,14 +237,15 @@ impl Task {
     ) -> Result<Self, sqlx::Error> {
         sqlx::query_as!(
             Task,
-            r#"INSERT INTO tasks (id, project_id, title, description, status) 
-               VALUES ($1, $2, $3, $4, $5) 
-               RETURNING id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>""#,
+            r#"INSERT INTO tasks (id, project_id, title, description, status, assigned_persona_id) 
+               VALUES ($1, $2, $3, $4, $5, $6) 
+               RETURNING id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>", assigned_persona_id as "assigned_persona_id?: Uuid""#,
             task_id,
             data.project_id,
             data.title,
             data.description,
-            TaskStatus::Todo as TaskStatus
+            TaskStatus::Todo as TaskStatus,
+            data.assigned_persona_id
         )
         .fetch_one(pool)
         .await
@@ -258,7 +265,7 @@ impl Task {
             r#"UPDATE tasks 
                SET title = $3, description = $4, status = $5 
                WHERE id = $1 AND project_id = $2 
-               RETURNING id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>""#,
+               RETURNING id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>", assigned_persona_id as "assigned_persona_id?: Uuid""#,
             id,
             project_id,
             title,

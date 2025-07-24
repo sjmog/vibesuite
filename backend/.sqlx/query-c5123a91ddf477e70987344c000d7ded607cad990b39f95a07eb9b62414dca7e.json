@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT \n            pa.id as \"id!: Uuid\",\n            pa.project_persona_id as \"project_persona_id!: Uuid\",\n            pa.task_id as \"task_id?: Uuid\",\n            t.title as \"task_title?\",\n            pa.activity_type as \"activity_type!: crate::models::persona::ActivityType\",\n            pa.description,\n            pa.professionalism_change,\n            pa.quality_change,\n            pa.task_size as \"task_size!: crate::models::persona::TaskSize\",\n            pa.metadata,\n            pa.created_at as \"created_at!: chrono::DateTime<chrono::Utc>\"\n        FROM persona_activities pa\n        LEFT JOIN tasks t ON pa.task_id = t.id\n        WHERE pa.project_persona_id = $1\n        ORDER BY pa.created_at DESC\n        LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "project_persona_id!: Uuid",
+        "ordinal": 1,
+        "type_info": "Blob"
+      },
+      {
+        "name": "task_id?: Uuid",
+        "ordinal": 2,
+        "type_info": "Blob"
+      },
+      {
+        "name": "task_title?",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "activity_type!: crate::models::persona::ActivityType",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "professionalism_change",
+        "ordinal": 6,
+        "type_info": "Float"
+      },
+      {
+        "name": "quality_change",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "task_size!: crate::models::persona::TaskSize",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "metadata",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!: chrono::DateTime<chrono::Utc>",
+        "ordinal": 10,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "c5123a91ddf477e70987344c000d7ded607cad990b39f95a07eb9b62414dca7e"
+}

@@ -1,0 +1,104 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO project_personas (\n                id, project_id, template_id, custom_name, custom_instructions,\n                is_active, professionalism_score, quality_score,\n                kudos_quota_used, wtf_quota_used, last_quota_reset\n            ) VALUES ($1, $2, $3, $4, $5, 1, 0.0, 0.0, 0, 0, datetime('now', 'subsec'))\n            RETURNING \n                id as \"id!: Uuid\",\n                project_id as \"project_id!: Uuid\",\n                template_id as \"template_id!: Uuid\",\n                custom_name,\n                custom_instructions,\n                is_active,\n                professionalism_score,\n                quality_score,\n                kudos_quota_used,\n                wtf_quota_used,\n                last_quota_reset as \"last_quota_reset!: DateTime<Utc>\",\n                imported_from_project_id as \"imported_from_project_id?: Uuid\",\n                imported_at as \"imported_at?: DateTime<Utc>\",\n                created_at as \"created_at!: DateTime<Utc>\",\n                updated_at as \"updated_at!: DateTime<Utc>\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "project_id!: Uuid",
+        "ordinal": 1,
+        "type_info": "Blob"
+      },
+      {
+        "name": "template_id!: Uuid",
+        "ordinal": 2,
+        "type_info": "Blob"
+      },
+      {
+        "name": "custom_name",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "custom_instructions",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_active",
+        "ordinal": 5,
+        "type_info": "Bool"
+      },
+      {
+        "name": "professionalism_score",
+        "ordinal": 6,
+        "type_info": "Float"
+      },
+      {
+        "name": "quality_score",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "kudos_quota_used",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "wtf_quota_used",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_quota_reset!: DateTime<Utc>",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "imported_from_project_id?: Uuid",
+        "ordinal": 11,
+        "type_info": "Blob"
+      },
+      {
+        "name": "imported_at?: DateTime<Utc>",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!: DateTime<Utc>",
+        "ordinal": 13,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at!: DateTime<Utc>",
+        "ordinal": 14,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "448c74cb43bdbb4551cdde5ec61c0a7ae015d385b3fea342621e8383efb31187"
+}

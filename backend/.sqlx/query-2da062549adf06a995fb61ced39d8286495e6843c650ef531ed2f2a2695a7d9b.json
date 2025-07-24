@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!: Uuid\", project_id as \"project_id!: Uuid\", title, description, status as \"status!: TaskStatus\", created_at as \"created_at!: DateTime<Utc>\", updated_at as \"updated_at!: DateTime<Utc>\"\n               FROM tasks \n               WHERE id = $1 AND project_id = $2",
+  "query": "SELECT id as \"id!: Uuid\", project_id as \"project_id!: Uuid\", title, description, status as \"status!: TaskStatus\", created_at as \"created_at!: DateTime<Utc>\", updated_at as \"updated_at!: DateTime<Utc>\", assigned_persona_id as \"assigned_persona_id?: Uuid\"\n               FROM tasks \n               WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -37,10 +37,15 @@
         "name": "updated_at!: DateTime<Utc>",
         "ordinal": 6,
         "type_info": "Text"
+      },
+      {
+        "name": "assigned_persona_id?: Uuid",
+        "ordinal": 7,
+        "type_info": "Blob"
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 1
     },
     "nullable": [
       true,
@@ -49,8 +54,9 @@
       true,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "73a58d62b2f18489ef5be9f4760f3bee51d6dedd550c3be9bf72e29b2203e63c"
+  "hash": "2da062549adf06a995fb61ced39d8286495e6843c650ef531ed2f2a2695a7d9b"
 }

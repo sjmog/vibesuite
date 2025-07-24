@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT \n                id as \"id!: Uuid\",\n                name,\n                role_type as \"role_type!: RoleType\",\n                default_instructions,\n                description,\n                capabilities,\n                tool_restrictions,\n                automation_triggers,\n                kudos_quota_daily,\n                is_system,\n                created_at as \"created_at!: DateTime<Utc>\",\n                updated_at as \"updated_at!: DateTime<Utc>\"\n            FROM persona_templates\n            ORDER BY is_system DESC, name ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "role_type!: RoleType",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "default_instructions",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "capabilities",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "tool_restrictions",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "automation_triggers",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "kudos_quota_daily",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "is_system",
+        "ordinal": 9,
+        "type_info": "Bool"
+      },
+      {
+        "name": "created_at!: DateTime<Utc>",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at!: DateTime<Utc>",
+        "ordinal": 11,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e9e70b2f5048bdd228c9a9cc0003f89d84384d377498dadcaf7f7d72b324be50"
+}

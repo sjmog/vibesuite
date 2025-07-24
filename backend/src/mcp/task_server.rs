@@ -267,6 +267,7 @@ impl TaskServer {
             project_id: project_uuid,
             title: title.clone(),
             description: description.clone(),
+            assigned_persona_id: None,
         };
 
         match Task::create(&self.pool, &create_task_data, task_id).await {

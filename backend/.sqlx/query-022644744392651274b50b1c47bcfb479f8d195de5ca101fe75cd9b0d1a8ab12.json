@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO action_artifacts (\n            id, action_id, artifact_type, file_path, content_before,\n            content_after, git_hash, output_data, size_bytes\n        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n        RETURNING \n            id as \"id!: Uuid\",\n            action_id as \"action_id!: Uuid\",\n            artifact_type as \"artifact_type!: crate::models::persona::ArtifactType\",\n            file_path,\n            content_before,\n            content_after,\n            git_hash,\n            output_data,\n            size_bytes,\n            created_at as \"created_at!: chrono::DateTime<chrono::Utc>\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "action_id!: Uuid",
+        "ordinal": 1,
+        "type_info": "Blob"
+      },
+      {
+        "name": "artifact_type!: crate::models::persona::ArtifactType",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "file_path",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "content_before",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "content_after",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "git_hash",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "output_data",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "size_bytes",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at!: chrono::DateTime<chrono::Utc>",
+        "ordinal": 9,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "022644744392651274b50b1c47bcfb479f8d195de5ca101fe75cd9b0d1a8ab12"
+}
