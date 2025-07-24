@@ -7,13 +7,14 @@ import {
   KanbanProvider,
 } from '@/components/ui/shadcn-io/kanban';
 import { TaskCard } from './TaskCard';
-import type { TaskStatus, TaskWithAttemptStatus } from 'shared/types';
+import type { TaskStatus, TaskWithAttemptStatus, ProjectPersonaWithTemplate } from 'shared/types';
 
 type Task = TaskWithAttemptStatus;
 
 interface TaskKanbanBoardProps {
   tasks: Task[];
   searchQuery?: string;
+  personas?: ProjectPersonaWithTemplate[];
   onDragEnd: (event: DragEndEvent) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (taskId: string) => void;
@@ -47,6 +48,7 @@ const statusBoardColors: Record<TaskStatus, string> = {
 function TaskKanbanBoard({
   tasks,
   searchQuery = '',
+  personas = [],
   onDragEnd,
   onEditTask,
   onDeleteTask,
@@ -97,6 +99,7 @@ function TaskKanbanBoard({
                 task={task}
                 index={index}
                 status={status}
+                personas={personas}
                 onEdit={onEditTask}
                 onDelete={onDeleteTask}
                 onViewDetails={onViewTaskDetails}

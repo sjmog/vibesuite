@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { Navbar } from '@/components/layout/navbar';
 import { Projects } from '@/pages/projects';
 import { ProjectTasks } from '@/pages/project-tasks';
+import { Team } from '@/pages/team';
 
 import { Settings } from '@/pages/Settings';
 import { McpServers } from '@/pages/McpServers';
@@ -165,6 +166,9 @@ function AppContent() {
               path="/projects/:projectId/tasks/:taskId"
               element={<ProjectTasks />}
             />
+            
+            <Route path="/team" element={<Team />} />
+            <Route path="/team/:personaId" element={<Team />} />
 
             <Route path="/settings" element={<Settings />} />
             <Route path="/mcp-servers" element={<McpServers />} />

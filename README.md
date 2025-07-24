@@ -25,6 +25,7 @@ AI coding agents are increasingly writing the world's code and human engineers n
 - Quickly review work and start dev servers
 - Track the status of tasks that your coding agents are working on
 - Centralise configuration of coding agent MCP configs
+- **NEW**: Manage AI personas with Virtual Team Mode for enhanced task delegation and specialized roles
 
 You can watch a video overview [here](https://youtu.be/TFT3KnZOOAk).
 
@@ -36,9 +37,46 @@ Make sure you have authenticated with your favourite coding agent. A full list o
 npx vibe-kanban
 ```
 
+## Features
+
+### Virtual Team Mode (NEW)
+Vibe Kanban now includes a comprehensive AI persona management system that transforms your coding experience:
+
+- **Team Tab**: Centralized management of AI personas for your projects
+- **14 Specialized Roles**: Pre-configured personas including @PM, @Developer, @Architect, @QA-Engineer, and more
+- **Dual Scoring System**: Track Professionalism and Quality scores for each persona with automated point calculation
+- **Activity Tracking**: Complete history of persona actions, file operations, and tool usage
+- **Template System**: Import default personas or create custom ones with specialized instructions
+- **Project-Specific Configuration**: Customize persona behavior per project with custom names and instructions
+- **Scoring & Recognition**: Kudos/WTF system for team performance feedback and learning
+
+### Core Task Management
+- **Project Organization**: Manage multiple coding projects with Git integration
+- **Kanban Board**: Visual task tracking with status columns (Todo, In Progress, In Review, Done)
+- **Agent Orchestration**: Switch between coding agents (Claude, Gemini, Amp, OpenCode) per task
+- **Live Monitoring**: Real-time process monitoring with logs and conversation history
+- **Pull Request Integration**: Automatic PR creation and status tracking
+- **MCP Server Management**: Configure and manage Model Context Protocol servers
+
+### Developer Experience
+- **Multi-Agent Support**: Claude Code, Gemini CLI, Codex, Amp, and other coding agents
+- **Live Development**: Hot reloading with integrated dev servers
+- **Git Workflow**: Automatic branch management and worktree isolation
+- **Code Review**: Diff visualization and conversation tracking
+- **Settings Management**: Theme, editor integration, and notification preferences
+
 ## Documentation
 
 Please head to the [website](https://vibekanban.com) for the latest documentation and user guides.
+
+### Quick Start with Virtual Team Mode
+
+1. Install and launch Vibe Kanban: `npx vibe-kanban`
+2. Navigate to the **Team** tab
+3. Click "Import Defaults" to add the 14 core personas to your project
+4. Customize personas with project-specific instructions
+5. Start delegating tasks using @-notation (e.g., "@Developer implement login feature")
+6. Monitor persona performance and activity in the Team dashboard
 
 ## Support
 
