@@ -16,12 +16,8 @@ import {
   Trash2,
   XCircle,
 } from 'lucide-react';
-<<<<<<< HEAD
 import type { TaskWithAttemptStatus, ProjectPersonaWithTemplate } from 'shared/types';
-=======
-import type { TaskWithAttemptStatus } from 'shared/types';
 import { is_planning_executor_type } from '@/lib/utils';
->>>>>>> upstream/main
 
 type Task = TaskWithAttemptStatus;
 
@@ -48,10 +44,8 @@ export function TaskCard({
   isFocused,
   tabIndex = -1,
 }: TaskCardProps) {
-<<<<<<< HEAD
   // Find the assigned persona
   const assignedPersona = personas.find(p => p.id === task.assigned_persona_id);
-=======
   const localRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (isFocused && localRef.current) {
@@ -75,7 +69,6 @@ export function TaskCard({
     onViewDetails(task);
   }, [task, onViewDetails]);
 
->>>>>>> upstream/main
   return (
     <KanbanCard
       key={task.id}

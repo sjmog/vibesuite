@@ -39,12 +39,9 @@ import type {
   ProjectWithBranch,
   TaskStatus,
   TaskWithAttemptStatus,
-<<<<<<< HEAD
   ProjectPersonaWithTemplate,
   ApiResponse,
-=======
   TaskTemplate,
->>>>>>> upstream/main
 } from 'shared/types';
 import type { DragEndEvent } from '@/components/ui/shadcn-io/kanban';
 import { makeRequest } from '@/lib/api';
@@ -65,9 +62,7 @@ export function ProjectTasks() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isProjectSettingsOpen, setIsProjectSettingsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-<<<<<<< HEAD
   const [personas, setPersonas] = useState<ProjectPersonaWithTemplate[]>([]);
-=======
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<TaskTemplate | null>(
     null
@@ -75,7 +70,6 @@ export function ProjectTasks() {
 
   // Template management state
   const [isTemplateManagerOpen, setIsTemplateManagerOpen] = useState(false);
->>>>>>> upstream/main
 
   // Panel state
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -110,7 +104,6 @@ export function ProjectTasks() {
     }
   }, [projectId]);
 
-<<<<<<< HEAD
   // Setup keyboard shortcuts
   useKeyboardShortcuts({
     navigate,
@@ -150,8 +143,6 @@ export function ProjectTasks() {
     }
   }, [taskId, tasks]);
 
-=======
->>>>>>> upstream/main
   const fetchProject = useCallback(async () => {
     try {
       const result = await projectsApi.getWithBranch(projectId!);
@@ -161,7 +152,6 @@ export function ProjectTasks() {
     }
   }, [projectId, navigate]);
 
-<<<<<<< HEAD
   const fetchPersonas = useCallback(async () => {
     if (!projectId) return;
     
@@ -177,7 +167,6 @@ export function ProjectTasks() {
     }
   }, [projectId]);
 
-=======
   const fetchTemplates = useCallback(async () => {
     if (!projectId) return;
 
@@ -204,7 +193,6 @@ export function ProjectTasks() {
     fetchTemplates(); // Refresh templates list when closing
   }, [fetchTemplates]);
 
->>>>>>> upstream/main
   const fetchTasks = useCallback(
     async (skipLoading = false) => {
       try {
@@ -251,11 +239,8 @@ export function ProjectTasks() {
           project_id: projectId!,
           title,
           description: description || null,
-<<<<<<< HEAD
           assigned_persona_id: assignedPersonaId,
-=======
           parent_task_attempt: null,
->>>>>>> upstream/main
         });
         await fetchTasks();
         // Open the newly created task in the details panel
@@ -288,6 +273,7 @@ export function ProjectTasks() {
             description: null,
             status: null,
             assigned_persona_id: assignedPersonaId,
+            parent_task_attempt: null,
           });
         }
         
@@ -310,11 +296,8 @@ export function ProjectTasks() {
           title,
           description: description || null,
           status,
-<<<<<<< HEAD
           assigned_persona_id: assignedPersonaId,
-=======
           parent_task_attempt: null,
->>>>>>> upstream/main
         });
         await fetchTasks();
         setEditingTask(null);
@@ -389,11 +372,8 @@ export function ProjectTasks() {
           title: task.title,
           description: task.description,
           status: newStatus,
-<<<<<<< HEAD
           assigned_persona_id: null, // Keep existing assignment when dragging
-=======
           parent_task_attempt: task.parent_task_attempt,
->>>>>>> upstream/main
         });
       } catch (err) {
         // Revert the optimistic update if the API call failed

@@ -7,16 +7,12 @@ import {
   KanbanProvider,
 } from '@/components/ui/shadcn-io/kanban';
 import { TaskCard } from './TaskCard';
-<<<<<<< HEAD
 import type { TaskStatus, TaskWithAttemptStatus, ProjectPersonaWithTemplate } from 'shared/types';
-=======
-import type { TaskStatus, TaskWithAttemptStatus } from 'shared/types';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   useKeyboardShortcuts,
   useKanbanKeyboardNavigation,
 } from '@/lib/keyboard-shortcuts.ts';
->>>>>>> upstream/main
 
 type Task = TaskWithAttemptStatus;
 

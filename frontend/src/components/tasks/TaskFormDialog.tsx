@@ -18,13 +18,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useConfig } from '@/components/config-provider';
-<<<<<<< HEAD
-import { makeRequest } from '@/lib/api';
-import type { TaskStatus, ExecutorConfig, ProjectPersonaWithTemplate, ApiResponse } from 'shared/types';
-=======
-import { templatesApi } from '@/lib/api';
-import type { TaskStatus, ExecutorConfig, TaskTemplate } from 'shared/types';
->>>>>>> upstream/main
+import { makeRequest, templatesApi } from '@/lib/api';
+import type { TaskStatus, ExecutorConfig, TaskTemplate, ProjectPersonaWithTemplate, ApiResponse } from 'shared/types';
 
 interface Task {
   id: string;
@@ -42,12 +37,8 @@ interface TaskFormDialogProps {
   onOpenChange: (open: boolean) => void;
   task?: Task | null; // Optional for create mode
   projectId?: string; // For file search functionality
-<<<<<<< HEAD
-  onCreateTask?: (title: string, description: string, assignedPersonaId: string | null) => Promise<void>;
-=======
   initialTemplate?: TaskTemplate | null; // For pre-filling from template
-  onCreateTask?: (title: string, description: string) => Promise<void>;
->>>>>>> upstream/main
+  onCreateTask?: (title: string, description: string, assignedPersonaId: string | null) => Promise<void>;
   onCreateAndStartTask?: (
     title: string,
     description: string,
@@ -85,13 +76,10 @@ export function TaskFormDialog({
   const [assignedPersonaId, setAssignedPersonaId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmittingAndStart, setIsSubmittingAndStart] = useState(false);
-<<<<<<< HEAD
   const [personas, setPersonas] = useState<ProjectPersonaWithTemplate[]>([]);
   const [loadingPersonas, setLoadingPersonas] = useState(false);
-=======
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
->>>>>>> upstream/main
 
   const { config } = useConfig();
   const isEditMode = Boolean(task);
@@ -108,26 +96,20 @@ export function TaskFormDialog({
       setTitle(task.title);
       setDescription(task.description || '');
       setStatus(task.status);
-<<<<<<< HEAD
       setAssignedPersonaId(task.assigned_persona_id);
-=======
     } else if (initialTemplate) {
       // Create mode with template - pre-fill from template
       setTitle(initialTemplate.title);
       setDescription(initialTemplate.description || '');
       setStatus('todo');
       setSelectedTemplate('');
->>>>>>> upstream/main
     } else {
       // Create mode - reset to defaults
       setTitle('');
       setDescription('');
       setStatus('todo');
-<<<<<<< HEAD
       setAssignedPersonaId(null);
-=======
       setSelectedTemplate('');
->>>>>>> upstream/main
     }
   }, [task, initialTemplate, isOpen]);
 
@@ -269,11 +251,8 @@ export function TaskFormDialog({
       setTitle('');
       setDescription('');
       setStatus('todo');
-<<<<<<< HEAD
       setAssignedPersonaId(null);
-=======
       setSelectedTemplate('');
->>>>>>> upstream/main
     }
     onOpenChange(false);
   }, [task, onOpenChange]);
@@ -384,7 +363,6 @@ export function TaskFormDialog({
             />
           </div>
 
-<<<<<<< HEAD
           <div>
             <Label htmlFor="task-persona">Assign to Persona</Label>
             <Select
@@ -408,7 +386,6 @@ export function TaskFormDialog({
               <p className="text-sm text-muted-foreground mt-1">Loading personas...</p>
             )}
           </div>
-=======
           {!isEditMode && templates.length > 0 && (
             <div className="pt-2">
               <details className="group">
@@ -456,7 +433,6 @@ export function TaskFormDialog({
               </details>
             </div>
           )}
->>>>>>> upstream/main
 
           {isEditMode && (
             <div className="pt-2">

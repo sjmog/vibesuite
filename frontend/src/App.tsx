@@ -111,37 +111,19 @@ function AppContent() {
         updateConfig(latestConfig);
         setShowGitHubLogin(false);
 
-<<<<<<< HEAD
         // If user skipped (no GitHub token), we need to manually set the acknowledgment
-        if (!latestConfig.github?.token) {
-          const updatedConfig = {
-            ...latestConfig,
-            github_login_acknowledged: true,
-          };
-          updateConfig(updatedConfig);
-          await configApi.saveConfig(updatedConfig);
-        }
+        const updatedConfig = {
+          ...latestConfig,
+          github_login_acknowledged: true,
+        };
+        updateConfig(updatedConfig);
+        await configApi.saveConfig(updatedConfig);
       } catch (err) {
         console.error('Error refreshing config:', err);
       } finally {
         if (!config?.telemetry_acknowledged) {
           setShowPrivacyOptIn(true);
         }
-=======
-      // If user skipped (no GitHub token), we need to manually set the acknowledgment
-
-      const updatedConfig = {
-        ...latestConfig,
-        github_login_acknowledged: true,
-      };
-      updateConfig(updatedConfig);
-      await configApi.saveConfig(updatedConfig);
-    } catch (err) {
-      console.error('Error refreshing config:', err);
-    } finally {
-      if (!config?.telemetry_acknowledged) {
-        setShowPrivacyOptIn(true);
->>>>>>> upstream/main
       }
     }
   };
