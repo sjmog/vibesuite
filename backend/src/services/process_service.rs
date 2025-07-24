@@ -1,16 +1,18 @@
+use std::str::FromStr;
+
 use sqlx::SqlitePool;
 use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::{
+    command_runner,
     executor::Executor,
     models::{
         execution_process::{CreateExecutionProcess, ExecutionProcess, ExecutionProcessType},
         executor_session::{CreateExecutorSession, ExecutorSession},
         project::Project,
         task::Task,
-        task_attempt::{TaskAttempt, TaskAttemptError, TaskAttemptStatus},
-        task_attempt_activity::{CreateTaskAttemptActivity, TaskAttemptActivity},
+        task_attempt::{TaskAttempt, TaskAttemptError},
     },
     utils::shell::get_shell_command,
 };
@@ -19,6 +21,47 @@ use crate::{
 pub struct ProcessService;
 
 impl ProcessService {
+    /// Run cleanup script if project has one configured
+    pub async fn run_cleanup_script_if_configured(
+        pool: &SqlitePool,
+        app_state: &crate::app_state::AppState,
+        attempt_id: Uuid,
+        task_id: Uuid,
+        project_id: Uuid,
+    ) -> Result<(), TaskAttemptError> {
+        // Get project to check if cleanup script exists
+        let project = Project::find_by_id(pool, project_id)
+            .await?
+            .ok_or(TaskAttemptError::ProjectNotFound)?;
+
+        if Self::should_run_cleanup_script(&project) {
+            // Get worktree path
+            let task_attempt = TaskAttempt::find_by_id(pool, attempt_id).await?.ok_or(
+                TaskAttemptError::ValidationError("Task attempt not found".to_string()),
+            )?;
+
+            tracing::info!(
+                "Running cleanup script for project {} in attempt {}",
+                project_id,
+                attempt_id
+            );
+
+            Self::start_cleanup_script(
+                pool,
+                app_state,
+                attempt_id,
+                task_id,
+                &project,
+                &task_attempt.worktree_path,
+            )
+            .await?;
+        } else {
+            tracing::debug!("No cleanup script configured for project {}", project_id);
+        }
+
+        Ok(())
+    }
+
     /// Automatically run setup if needed, then continue with the specified operation
     pub async fn auto_setup_and_execute(
         pool: &SqlitePool,
@@ -120,14 +163,7 @@ impl ProcessService {
         )
         .await?;
 
-        // Create activity record
-        Self::create_activity_record(
-            pool,
-            process_id,
-            TaskAttemptStatus::SetupRunning,
-            "Starting setup script with delegation",
-        )
-        .await?;
+        // Setup script starting with delegation
 
         tracing::info!(
             "Starting setup script with delegation to {} for task attempt {}",
@@ -216,9 +252,11 @@ impl ProcessService {
             app_state,
             attempt_id,
             task_id,
-            crate::executor::ExecutorType::CodingAgent(executor_config),
+            crate::executor::ExecutorType::CodingAgent {
+                config: executor_config,
+                follow_up: None,
+            },
             "Starting executor".to_string(),
-            TaskAttemptStatus::ExecutorRunning,
             ExecutionProcessType::CodingAgent,
             &task_attempt.worktree_path,
         )
@@ -286,7 +324,6 @@ impl ProcessService {
             task_id,
             crate::executor::ExecutorType::DevServer(dev_script),
             "Starting dev server".to_string(),
-            TaskAttemptStatus::ExecutorRunning, // Dev servers don't create activities, just use generic status
             ExecutionProcessType::DevServer,
             &worktree_path,
         )
@@ -444,10 +481,12 @@ impl ProcessService {
                 "SESSION_FOLLOWUP: Attempting follow-up execution with session ID: {} (attempt: {}, worktree: {})",
                 session_id, attempt_id, worktree_path
             );
-            crate::executor::ExecutorType::FollowUpCodingAgent {
+            crate::executor::ExecutorType::CodingAgent {
                 config: executor_config.clone(),
-                session_id: executor_session.session_id.clone(),
-                prompt: prompt.to_string(),
+                follow_up: Some(crate::executor::FollowUpInfo {
+                    session_id: session_id.clone(),
+                    prompt: prompt.to_string(),
+                }),
             }
         } else {
             // No session ID available, start new session
@@ -455,7 +494,10 @@ impl ProcessService {
                 "SESSION_FOLLOWUP: No session ID available for follow-up execution on attempt {}, starting new session (worktree: {})",
                 attempt_id, worktree_path
             );
-            crate::executor::ExecutorType::CodingAgent(executor_config.clone())
+            crate::executor::ExecutorType::CodingAgent {
+                config: executor_config.clone(),
+                follow_up: None,
+            }
         };
 
         // Try to start the follow-up execution
@@ -466,7 +508,6 @@ impl ProcessService {
             task_id,
             followup_executor,
             "Starting follow-up executor".to_string(),
-            TaskAttemptStatus::ExecutorRunning,
             ExecutionProcessType::CodingAgent,
             &worktree_path,
         )
@@ -483,7 +524,10 @@ impl ProcessService {
             );
 
             // Create a new session instead of trying to resume
-            let new_session_executor = crate::executor::ExecutorType::CodingAgent(executor_config);
+            let new_session_executor = crate::executor::ExecutorType::CodingAgent {
+                config: executor_config,
+                follow_up: None,
+            };
 
             Self::start_process_execution(
                 pool,
@@ -492,7 +536,6 @@ impl ProcessService {
                 task_id,
                 new_session_executor,
                 "Starting new executor session (follow-up session failed)".to_string(),
-                TaskAttemptStatus::ExecutorRunning,
                 ExecutionProcessType::CodingAgent,
                 &worktree_path,
             )
@@ -514,7 +557,6 @@ impl ProcessService {
         task_id: Uuid,
         executor_type: crate::executor::ExecutorType,
         activity_note: String,
-        activity_status: TaskAttemptStatus,
         process_type: ExecutionProcessType,
         worktree_path: &str,
     ) -> Result<(), TaskAttemptError> {
@@ -535,9 +577,10 @@ impl ProcessService {
         if matches!(process_type, ExecutionProcessType::CodingAgent) {
             // Extract follow-up prompt if this is a follow-up execution
             let followup_prompt = match &executor_type {
-                crate::executor::ExecutorType::FollowUpCodingAgent { prompt, .. } => {
-                    Some(prompt.clone())
-                }
+                crate::executor::ExecutorType::CodingAgent {
+                    follow_up: Some(ref info),
+                    ..
+                } => Some(info.prompt.clone()),
                 _ => None,
             };
             Self::create_executor_session_record(
@@ -550,11 +593,7 @@ impl ProcessService {
             .await?;
         }
 
-        // Create activity record (skip for dev servers as they run in parallel)
-        if !matches!(process_type, ExecutionProcessType::DevServer) {
-            Self::create_activity_record(pool, process_id, activity_status.clone(), &activity_note)
-                .await?;
-        }
+        // Process started successfully
 
         tracing::info!("Starting {} for task attempt {}", activity_note, attempt_id);
 
@@ -607,6 +646,14 @@ impl ProcessService {
             .unwrap_or(false)
     }
 
+    fn should_run_cleanup_script(project: &Project) -> bool {
+        project
+            .cleanup_script
+            .as_ref()
+            .map(|script| !script.trim().is_empty())
+            .unwrap_or(false)
+    }
+
     /// Start the setup script execution
     async fn start_setup_script(
         pool: &SqlitePool,
@@ -625,8 +672,31 @@ impl ProcessService {
             task_id,
             crate::executor::ExecutorType::SetupScript(setup_script.clone()),
             "Starting setup script".to_string(),
-            TaskAttemptStatus::SetupRunning,
             ExecutionProcessType::SetupScript,
+            worktree_path,
+        )
+        .await
+    }
+
+    /// Start the cleanup script execution
+    async fn start_cleanup_script(
+        pool: &SqlitePool,
+        app_state: &crate::app_state::AppState,
+        attempt_id: Uuid,
+        task_id: Uuid,
+        project: &Project,
+        worktree_path: &str,
+    ) -> Result<(), TaskAttemptError> {
+        let cleanup_script = project.cleanup_script.as_ref().unwrap();
+
+        Self::start_process_execution(
+            pool,
+            app_state,
+            attempt_id,
+            task_id,
+            crate::executor::ExecutorType::CleanupScript(cleanup_script.clone()),
+            "Starting cleanup script".to_string(),
+            ExecutionProcessType::CleanupScript,
             worktree_path,
         )
         .await
@@ -634,12 +704,17 @@ impl ProcessService {
 
     /// Resolve executor configuration from string name
     fn resolve_executor_config(executor_name: &Option<String>) -> crate::executor::ExecutorConfig {
-        match executor_name.as_ref().map(|s| s.as_str()) {
-            Some("claude") => crate::executor::ExecutorConfig::Claude,
-            Some("amp") => crate::executor::ExecutorConfig::Amp,
-            Some("gemini") => crate::executor::ExecutorConfig::Gemini,
-            Some("charmopencode") => crate::executor::ExecutorConfig::CharmOpencode,
-            _ => crate::executor::ExecutorConfig::Echo, // Default for "echo" or None
+        if let Some(name) = executor_name {
+            crate::executor::ExecutorConfig::from_str(name).unwrap_or_else(|_| {
+                tracing::warn!(
+                    "Unknown executor type '{}', defaulting to EchoExecutor",
+                    name
+                );
+                crate::executor::ExecutorConfig::Echo
+            })
+        } else {
+            tracing::warn!("No executor type specified, defaulting to EchoExecutor");
+            crate::executor::ExecutorConfig::Echo
         }
     }
 
@@ -656,22 +731,27 @@ impl ProcessService {
         let (command, args, executor_type_string) = match executor_type {
             crate::executor::ExecutorType::SetupScript(_) => (
                 shell_cmd.to_string(),
-                Some(serde_json::to_string(&[shell_arg, "setup_script"]).unwrap()),
-                None, // Setup scripts don't have an executor type
+                Some(serde_json::to_string(&[shell_arg, "setup-script"]).unwrap()),
+                Some("setup-script".to_string()),
+            ),
+            crate::executor::ExecutorType::CleanupScript(_) => (
+                shell_cmd.to_string(),
+                Some(serde_json::to_string(&[shell_arg, "cleanup-script"]).unwrap()),
+                Some("cleanup-script".to_string()),
             ),
             crate::executor::ExecutorType::DevServer(_) => (
                 shell_cmd.to_string(),
                 Some(serde_json::to_string(&[shell_arg, "dev_server"]).unwrap()),
                 None, // Dev servers don't have an executor type
             ),
-            crate::executor::ExecutorType::CodingAgent(config) => {
-                ("executor".to_string(), None, Some(format!("{}", config)))
+            crate::executor::ExecutorType::CodingAgent { config, follow_up } => {
+                let command = if follow_up.is_some() {
+                    "followup_executor".to_string()
+                } else {
+                    "executor".to_string()
+                };
+                (command, None, Some(format!("{}", config)))
             }
-            crate::executor::ExecutorType::FollowUpCodingAgent { config, .. } => (
-                "followup_executor".to_string(),
-                None,
-                Some(format!("{}", config)),
-            ),
         };
 
         let create_process = CreateExecutionProcess {
@@ -719,26 +799,6 @@ impl ProcessService {
             .map_err(TaskAttemptError::from)
     }
 
-    /// Create activity record for process start
-    async fn create_activity_record(
-        pool: &SqlitePool,
-        process_id: Uuid,
-        activity_status: TaskAttemptStatus,
-        activity_note: &str,
-    ) -> Result<(), TaskAttemptError> {
-        let activity_id = Uuid::new_v4();
-        let create_activity = CreateTaskAttemptActivity {
-            execution_process_id: process_id,
-            status: Some(activity_status.clone()),
-            note: Some(activity_note.to_string()),
-        };
-
-        TaskAttemptActivity::create(pool, &create_activity, activity_id, activity_status)
-            .await
-            .map(|_| ())
-            .map_err(TaskAttemptError::from)
-    }
-
     /// Execute the process based on type
     async fn execute_process(
         executor_type: &crate::executor::ExecutorType,
@@ -747,12 +807,20 @@ impl ProcessService {
         attempt_id: Uuid,
         process_id: Uuid,
         worktree_path: &str,
-    ) -> Result<command_group::AsyncGroupChild, TaskAttemptError> {
-        use crate::executors::{DevServerExecutor, SetupScriptExecutor};
+    ) -> Result<command_runner::CommandProcess, TaskAttemptError> {
+        use crate::executors::{CleanupScriptExecutor, DevServerExecutor, SetupScriptExecutor};
 
         let result = match executor_type {
             crate::executor::ExecutorType::SetupScript(script) => {
                 let executor = SetupScriptExecutor {
+                    script: script.clone(),
+                };
+                executor
+                    .execute_streaming(pool, task_id, attempt_id, process_id, worktree_path)
+                    .await
+            }
+            crate::executor::ExecutorType::CleanupScript(script) => {
+                let executor = CleanupScriptExecutor {
                     script: script.clone(),
                 };
                 executor
@@ -767,73 +835,26 @@ impl ProcessService {
                     .execute_streaming(pool, task_id, attempt_id, process_id, worktree_path)
                     .await
             }
-            crate::executor::ExecutorType::CodingAgent(config) => {
+            crate::executor::ExecutorType::CodingAgent { config, follow_up } => {
                 let executor = config.create_executor();
-                executor
-                    .execute_streaming(pool, task_id, attempt_id, process_id, worktree_path)
-                    .await
-            }
-            crate::executor::ExecutorType::FollowUpCodingAgent {
-                config,
-                session_id,
-                prompt,
-            } => {
-                use crate::executors::{
-                    AmpFollowupExecutor, CharmOpencodeFollowupExecutor, ClaudeFollowupExecutor,
-                    GeminiFollowupExecutor,
-                };
 
-                let executor: Box<dyn crate::executor::Executor> = match config {
-                    crate::executor::ExecutorConfig::Claude => {
-                        if let Some(sid) = session_id {
-                            Box::new(ClaudeFollowupExecutor {
-                                session_id: sid.clone(),
-                                prompt: prompt.clone(),
-                            })
-                        } else {
-                            return Err(TaskAttemptError::TaskNotFound); // No session ID for followup
-                        }
-                    }
-                    crate::executor::ExecutorConfig::Amp => {
-                        if let Some(tid) = session_id {
-                            Box::new(AmpFollowupExecutor {
-                                thread_id: tid.clone(),
-                                prompt: prompt.clone(),
-                            })
-                        } else {
-                            return Err(TaskAttemptError::TaskNotFound); // No thread ID for followup
-                        }
-                    }
-                    crate::executor::ExecutorConfig::Gemini => {
-                        // For Gemini, we don't use real session IDs, we pass the context directly
-                        Box::new(GeminiFollowupExecutor {
+                if let Some(ref follow_up_info) = follow_up {
+                    executor
+                        .execute_followup_streaming(
+                            pool,
+                            task_id,
                             attempt_id,
-                            prompt: prompt.clone(),
-                        })
-                    }
-                    crate::executor::ExecutorConfig::Echo => {
-                        // Echo doesn't support followup, use regular echo
-                        config.create_executor()
-                    }
-                    crate::executor::ExecutorConfig::CharmOpencode => {
-                        if let Some(sid) = session_id {
-                            Box::new(CharmOpencodeFollowupExecutor {
-                                session_id: sid.clone(),
-                                prompt: prompt.clone(),
-                            })
-                        } else {
-                            return Err(TaskAttemptError::TaskNotFound); // No session ID for followup
-                        }
-                    }
-                    crate::executor::ExecutorConfig::SetupScript { .. } => {
-                        // Setup scripts don't support followup, use regular setup script
-                        config.create_executor()
-                    }
-                };
-
-                executor
-                    .execute_streaming(pool, task_id, attempt_id, process_id, worktree_path)
-                    .await
+                            process_id,
+                            &follow_up_info.session_id,
+                            &follow_up_info.prompt,
+                            worktree_path,
+                        )
+                        .await
+                } else {
+                    executor
+                        .execute_streaming(pool, task_id, attempt_id, process_id, worktree_path)
+                        .await
+                }
             }
         };
 
@@ -846,10 +867,11 @@ impl ProcessService {
         process_id: Uuid,
         attempt_id: Uuid,
         process_type: &ExecutionProcessType,
-        child: command_group::AsyncGroupChild,
+        child: command_runner::CommandProcess,
     ) {
         let execution_type = match process_type {
             ExecutionProcessType::SetupScript => crate::app_state::ExecutionType::SetupScript,
+            ExecutionProcessType::CleanupScript => crate::app_state::ExecutionType::CleanupScript,
             ExecutionProcessType::CodingAgent => crate::app_state::ExecutionType::CodingAgent,
             ExecutionProcessType::DevServer => crate::app_state::ExecutionType::DevServer,
         };
@@ -880,7 +902,7 @@ impl ProcessService {
         // Store delegation context in args for execution monitor to read
         let args_with_delegation = serde_json::json!([
             shell_arg,
-            "setup_script",
+            "setup-script",
             "--delegation-context",
             delegation_context.to_string()
         ]);
@@ -888,7 +910,7 @@ impl ProcessService {
         let create_process = CreateExecutionProcess {
             task_attempt_id: attempt_id,
             process_type: ExecutionProcessType::SetupScript,
-            executor_type: None, // Setup scripts don't have an executor type
+            executor_type: Some("setup-script".to_string()),
             command: shell_cmd.to_string(),
             args: Some(args_with_delegation.to_string()),
             working_directory: worktree_path.to_string(),
@@ -907,7 +929,7 @@ impl ProcessService {
         attempt_id: Uuid,
         process_id: Uuid,
         worktree_path: &str,
-    ) -> Result<command_group::AsyncGroupChild, TaskAttemptError> {
+    ) -> Result<command_runner::CommandProcess, TaskAttemptError> {
         use crate::executors::SetupScriptExecutor;
 
         let executor = SetupScriptExecutor {

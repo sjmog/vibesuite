@@ -18,7 +18,11 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
 import { Loader2 } from 'lucide-react';
-import { EXECUTOR_TYPES, EXECUTOR_LABELS } from 'shared/types';
+import {
+  EXECUTOR_TYPES,
+  EXECUTOR_LABELS,
+  MCP_SUPPORTED_EXECUTORS,
+} from 'shared/types';
 import { useConfig } from '@/components/config-provider';
 import { mcpServersApi } from '../lib/api';
 
@@ -35,7 +39,12 @@ export function McpServers() {
   // Initialize selected MCP executor when config loads
   useEffect(() => {
     if (config?.executor?.type && !selectedMcpExecutor) {
-      setSelectedMcpExecutor(config.executor.type);
+      // If current executor supports MCP, use it; otherwise use first available MCP executor
+      if (MCP_SUPPORTED_EXECUTORS.includes(config.executor.type)) {
+        setSelectedMcpExecutor(config.executor.type);
+      } else {
+        setSelectedMcpExecutor(MCP_SUPPORTED_EXECUTORS[0] || 'claude');
+      }
     }
   }, [config?.executor?.type, selectedMcpExecutor]);
 
@@ -50,7 +59,9 @@ export function McpServers() {
       const defaultConfig =
         executorType === 'amp'
           ? '{\n  "amp.mcpServers": {\n  }\n}'
-          : '{\n  "mcpServers": {\n  }\n}';
+          : executorType === 'sst-opencode'
+            ? '{\n  "mcp": {\n  }, "$schema": "https://opencode.ai/config.json"\n}'
+            : '{\n  "mcpServers": {\n  }\n}';
       setMcpServers(defaultConfig);
       setMcpConfigPath('');
 
@@ -67,6 +78,11 @@ export function McpServers() {
         if (executorType === 'amp') {
           // For AMP, use the amp.mcpServers structure
           fullConfig = { 'amp.mcpServers': servers };
+        } else if (executorType === 'sst-opencode') {
+          fullConfig = {
+            mcp: servers,
+            $schema: 'https://opencode.ai/config.json',
+          };
         } else {
           // For other executors, use the standard mcpServers structure
           fullConfig = { mcpServers: servers };
@@ -110,6 +126,10 @@ export function McpServers() {
               'AMP configuration must contain an "amp.mcpServers" object'
             );
           }
+        } else if (selectedMcpExecutor === 'sst-opencode') {
+          if (!config.mcp || typeof config.mcp !== 'object') {
+            setMcpError('Configuration must contain an "mcp" object');
+          }
         } else {
           if (!config.mcpServers || typeof config.mcpServers !== 'object') {
             setMcpError('Configuration must contain an "mcpServers" object');
@@ -129,10 +149,17 @@ export function McpServers() {
       const existingConfig = mcpServers.trim() ? JSON.parse(mcpServers) : {};
 
       // Always use production MCP installation instructions
-      const vibeKanbanConfig = {
-        command: 'npx',
-        args: ['-y', 'vibe-kanban', '--mcp'],
-      };
+      const vibeKanbanConfig =
+        selectedMcpExecutor === 'sst-opencode'
+          ? {
+              type: 'local',
+              command: ['npx', '-y', 'vibe-kanban', '--mcp'],
+              enabled: true,
+            }
+          : {
+              command: 'npx',
+              args: ['-y', 'vibe-kanban', '--mcp'],
+            };
 
       // Add vibe_kanban to the existing configuration
       let updatedConfig;
@@ -141,6 +168,14 @@ export function McpServers() {
           ...existingConfig,
           'amp.mcpServers': {
             ...(existingConfig['amp.mcpServers'] || {}),
+            vibe_kanban: vibeKanbanConfig,
+          },
+        };
+      } else if (selectedMcpExecutor === 'sst-opencode') {
+        updatedConfig = {
+          ...existingConfig,
+          mcp: {
+            ...(existingConfig.mcp || {}),
             vibe_kanban: vibeKanbanConfig,
           },
         };
@@ -189,6 +224,12 @@ export function McpServers() {
             }
             // Extract just the inner servers object for the API - backend will handle nesting
             mcpServersConfig = fullConfig['amp.mcpServers'];
+          } else if (selectedMcpExecutor === 'sst-opencode') {
+            if (!fullConfig.mcp || typeof fullConfig.mcp !== 'object') {
+              throw new Error('Configuration must contain an "mcp" object');
+            }
+            // Extract just the mcp part for the API
+            mcpServersConfig = fullConfig.mcp;
           } else {
             if (
               !fullConfig.mcpServers ||
@@ -282,7 +323,9 @@ export function McpServers() {
                   <SelectValue placeholder="Select executor" />
                 </SelectTrigger>
                 <SelectContent>
-                  {EXECUTOR_TYPES.map((type) => (
+                  {EXECUTOR_TYPES.filter((type) =>
+                    MCP_SUPPORTED_EXECUTORS.includes(type)
+                  ).map((type) => (
                     <SelectItem key={type} value={type}>
                       {EXECUTOR_LABELS[type]}
                     </SelectItem>

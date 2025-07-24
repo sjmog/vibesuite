@@ -1,9 +1,57 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::executor::ExecutorConfig;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "lowercase")]
+pub enum Environment {
+    Local,
+    Cloud,
+}
+
+impl FromStr for Environment {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "local" => Ok(Environment::Local),
+            "cloud" => Ok(Environment::Cloud),
+            _ => Err(format!("Invalid environment: {}", s)),
+        }
+    }
+}
+
+impl Environment {
+    pub fn is_cloud(&self) -> bool {
+        matches!(self, Environment::Cloud)
+    }
+
+    pub fn is_local(&self) -> bool {
+        matches!(self, Environment::Local)
+    }
+}
+
+impl std::fmt::Display for Environment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Environment::Local => write!(f, "local"),
+            Environment::Cloud => write!(f, "cloud"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct EnvironmentInfo {
+    pub os_type: String,
+    pub os_version: String,
+    pub architecture: String,
+    pub bitness: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -20,6 +68,8 @@ pub struct Config {
     pub editor: EditorConfig,
     pub github: GitHubConfig,
     pub analytics_enabled: Option<bool>,
+    pub environment: EnvironmentInfo,
+    pub workspace_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -155,6 +205,8 @@ impl Default for SoundConstants {
 
 impl Default for Config {
     fn default() -> Self {
+        let info = os_info::get();
+
         Self {
             theme: ThemeMode::System,
             executor: ExecutorConfig::Claude,
@@ -168,6 +220,13 @@ impl Default for Config {
             editor: EditorConfig::default(),
             github: GitHubConfig::default(),
             analytics_enabled: None,
+            environment: EnvironmentInfo {
+                os_type: info.os_type().to_string(),
+                os_version: info.version().to_string(),
+                architecture: info.architecture().unwrap_or("unknown").to_string(),
+                bitness: info.bitness().to_string(),
+            },
+            workspace_dir: None,
         }
     }
 }
@@ -281,9 +340,26 @@ impl Config {
                     Ok(config)
                 }
                 Err(_) => {
-                    // If full deserialization fails, merge with defaults
-                    let config = Self::load_with_defaults(&content, config_path)?;
-                    Ok(config)
+                    // If full deserialization fails, try to merge with defaults
+                    match Self::load_with_defaults(&content, config_path) {
+                        Ok(config) => Ok(config),
+                        Err(_) => {
+                            // Even partial loading failed - backup the corrupted file
+                            if let Err(e) = Self::backup_corrupted_config(config_path) {
+                                tracing::error!("Failed to backup corrupted config: {}", e);
+                            }
+
+                            // Remove corrupted file and create a default config
+                            if let Err(e) = std::fs::remove_file(config_path) {
+                                tracing::error!("Failed to remove corrupted config file: {}", e);
+                            }
+
+                            // Create and save default config
+                            let config = Config::default();
+                            config.save(config_path)?;
+                            Ok(config)
+                        }
+                    }
                 }
             }
         } else {
@@ -332,6 +408,21 @@ impl Config {
             }
             (_, overlay) => overlay, // Use overlay value for non-objects
         }
+    }
+
+    /// Create a backup of the corrupted config file
+    fn backup_corrupted_config(config_path: &PathBuf) -> anyhow::Result<()> {
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup_filename = format!("config_backup_{}.json", timestamp);
+
+        let backup_path = config_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join(backup_filename);
+
+        std::fs::copy(config_path, &backup_path)?;
+        tracing::info!("Corrupted config backed up to: {}", backup_path.display());
+        Ok(())
     }
 
     pub fn save(&self, config_path: &PathBuf) -> anyhow::Result<()> {

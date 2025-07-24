@@ -17,10 +17,12 @@ use tracing_subscriber::{filter::LevelFilter, prelude::*};
 use vibe_kanban::{sentry_layer, Assets, ScriptAssets, SoundAssets};
 
 mod app_state;
+mod command_runner;
 mod execution_monitor;
 mod executor;
 mod executors;
 mod mcp;
+mod middleware;
 mod models;
 mod routes;
 mod services;
@@ -28,18 +30,26 @@ mod utils;
 
 use app_state::AppState;
 use execution_monitor::execution_monitor;
+<<<<<<< HEAD
 use models::{ApiResponse, Config};
 use routes::{auth, config, filesystem, health, personas, projects, task_attempts, tasks};
+=======
+use middleware::{
+    load_execution_process_simple_middleware, load_project_middleware,
+    load_task_attempt_middleware, load_task_middleware, load_task_template_middleware,
+};
+use models::{ApiResponse, Config, Environment};
+use routes::{
+    auth, config, filesystem, github, health, projects, stream, task_attempts, task_templates,
+    tasks,
+};
+>>>>>>> upstream/main
 use services::PrMonitorService;
 
 async fn echo_handler(
     Json(payload): Json<serde_json::Value>,
 ) -> ResponseJson<ApiResponse<serde_json::Value>> {
-    ResponseJson(ApiResponse {
-        success: true,
-        data: Some(payload),
-        message: Some("Echo successful".to_string()),
-    })
+    ResponseJson(ApiResponse::success(payload))
 }
 
 async fn static_handler(uri: axum::extract::Path<String>) -> impl IntoResponse {
@@ -164,8 +174,13 @@ fn main() -> anyhow::Result<()> {
             let config = Config::load(&config_path)?;
             let config_arc = Arc::new(RwLock::new(config));
 
+            let env = std::env::var("ENVIRONMENT")
+                .unwrap_or_else(|_| "local".to_string());
+            let mode = env.parse().unwrap_or(Environment::Local);
+            tracing::info!("Running in {mode} mode" );
+
             // Create app state
-            let app_state = AppState::new(pool.clone(), config_arc.clone()).await;
+            let app_state = AppState::new(pool.clone(), config_arc.clone(), mode).await;
 
             app_state.update_sentry_scope().await;
 
@@ -190,10 +205,76 @@ fn main() -> anyhow::Result<()> {
                 .route("/api/health", get(health::health_check))
                 .route("/api/echo", post(echo_handler));
 
+            // Create routers with different middleware layers
+            let base_routes = Router::new()
+                .merge(stream::stream_router())
+                .merge(filesystem::filesystem_router())
+                .merge(config::config_router())
+                .merge(auth::auth_router())
+                .route("/sounds/:filename", get(serve_sound_file))
+                .merge(
+                    Router::new()
+                        .route("/execution-processes/:process_id", get(task_attempts::get_execution_process))
+                        .route_layer(from_fn_with_state(app_state.clone(), load_execution_process_simple_middleware))
+                );
+
+            // Template routes with task template middleware applied selectively
+            let template_routes = Router::new()
+                .route("/templates", get(task_templates::list_templates).post(task_templates::create_template))
+                .route("/templates/global", get(task_templates::list_global_templates))
+                .route(
+                    "/projects/:project_id/templates",
+                    get(task_templates::list_project_templates),
+                )
+                .merge(
+                    Router::new()
+                        .route(
+                            "/templates/:template_id",
+                            get(task_templates::get_template)
+                                .put(task_templates::update_template)
+                                .delete(task_templates::delete_template),
+                        )
+                        .route_layer(from_fn_with_state(app_state.clone(), load_task_template_middleware))
+                );
+
+            // Project routes with project middleware
+            let project_routes = Router::new()
+                .merge(projects::projects_base_router())
+                .merge(projects::projects_with_id_router()
+                    .layer(from_fn_with_state(app_state.clone(), load_project_middleware)));
+
+            // Task routes with appropriate middleware
+            let task_routes = Router::new()
+                .merge(tasks::tasks_project_router()
+                    .layer(from_fn_with_state(app_state.clone(), load_project_middleware)))
+                .merge(tasks::tasks_with_id_router()
+                    .layer(from_fn_with_state(app_state.clone(), load_task_middleware)));
+
+            // Task attempt routes with appropriate middleware
+            let task_attempt_routes = Router::new()
+                .merge(task_attempts::task_attempts_list_router(app_state.clone())
+                    .layer(from_fn_with_state(app_state.clone(), load_task_middleware)))
+                .merge(task_attempts::task_attempts_with_id_router(app_state.clone())
+                    .layer(from_fn_with_state(app_state.clone(), load_task_attempt_middleware)));
+
+            // Conditionally add GitHub routes for cloud mode
+            let mut api_routes = Router::new()
+                .merge(base_routes)
+                .merge(template_routes)
+                .merge(project_routes)
+                .merge(task_routes)
+                .merge(task_attempt_routes);
+
+            if mode.is_cloud() {
+                api_routes = api_routes.merge(github::github_router());
+                tracing::info!("GitHub repository routes enabled (cloud mode)");
+            }
+
             // All routes (no auth required)
             let app_routes = Router::new()
                 .nest(
                     "/api",
+<<<<<<< HEAD
                     Router::new()
                         .merge(projects::projects_router())
                         .merge(tasks::tasks_router())
@@ -203,6 +284,9 @@ fn main() -> anyhow::Result<()> {
                         .merge(auth::auth_router())
                         .nest("/personas", personas::router())
                         .route("/sounds/:filename", get(serve_sound_file))
+=======
+                    api_routes
+>>>>>>> upstream/main
                         .layer(from_fn_with_state(app_state.clone(), auth::sentry_user_context_middleware)),
                 );
 
@@ -226,14 +310,15 @@ fn main() -> anyhow::Result<()> {
                     cleaned.trim().parse::<u16>().ok()
                 })
                 .unwrap_or_else(|| {
-                    tracing::error!("Failed to parse port after stripping ANSI, defaulting to 0");
+                    tracing::info!("No PORT environment variable set, using port 0 for auto-assignment");
                     0
                 }); // Use 0 to find free port if no specific port provided
 
-            let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
+            let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+            let listener = tokio::net::TcpListener::bind(format!("{host}:{port}")).await?;
             let actual_port = listener.local_addr()?.port(); // get → 53427 (example)
 
-            tracing::info!("Server running on http://0.0.0.0:{actual_port}");
+            tracing::info!("Server running on http://{host}:{actual_port}");
 
             if !cfg!(debug_assertions) {
                 tracing::info!("Opening browser...");

@@ -9,6 +9,9 @@ import {
 import type { TaskWithAttemptStatus } from 'shared/types';
 import DiffTab from '@/components/tasks/TaskDetails/DiffTab.tsx';
 import LogsTab from '@/components/tasks/TaskDetails/LogsTab.tsx';
+import RelatedTasksTab from '@/components/tasks/TaskDetails/RelatedTasksTab.tsx';
+import ProcessesTab from '@/components/tasks/TaskDetails/ProcessesTab.tsx';
+import PlanTab from '@/components/tasks/TaskDetails/PlanTab.tsx';
 import DeleteFileConfirmationDialog from '@/components/tasks/DeleteFileConfirmationDialog.tsx';
 import TabNavigation from '@/components/tasks/TaskDetails/TabNavigation.tsx';
 import CollapsibleToolbar from '@/components/tasks/TaskDetails/CollapsibleToolbar.tsx';
@@ -36,14 +39,14 @@ export function TaskDetailsPanel({
   const [showEditorDialog, setShowEditorDialog] = useState(false);
 
   // Tab and collapsible state
-  const [activeTab, setActiveTab] = useState<'logs' | 'diffs'>('logs');
-  const [userSelectedTab, setUserSelectedTab] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<
+    'logs' | 'diffs' | 'related' | 'processes' | 'plan'
+  >('logs');
 
   // Reset to logs tab when task changes
   useEffect(() => {
     if (task?.id) {
       setActiveTab('logs');
-      setUserSelectedTab(true); // Treat this as a user selection to prevent auto-switching
     }
   }, [task?.id]);
 
@@ -67,12 +70,10 @@ export function TaskDetailsPanel({
     <>
       {!task ? null : (
         <TaskDetailsProvider
+          key={task.id}
           task={task}
           projectId={projectId}
           setShowEditorDialog={setShowEditorDialog}
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          userSelectedTab={userSelectedTab}
           projectHasDevScript={projectHasDevScript}
         >
           {/* Backdrop - only on smaller screens (overlay mode) */}
@@ -92,14 +93,23 @@ export function TaskDetailsPanel({
               <TabNavigation
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
-                setUserSelectedTab={setUserSelectedTab}
               />
 
               {/* Tab Content */}
               <div
                 className={`flex-1 flex flex-col min-h-0 ${activeTab === 'logs' ? 'p-4' : 'pt-4'}`}
               >
-                {activeTab === 'diffs' ? <DiffTab /> : <LogsTab />}
+                {activeTab === 'diffs' ? (
+                  <DiffTab />
+                ) : activeTab === 'related' ? (
+                  <RelatedTasksTab />
+                ) : activeTab === 'processes' ? (
+                  <ProcessesTab />
+                ) : activeTab === 'plan' ? (
+                  <PlanTab />
+                ) : (
+                  <LogsTab />
+                )}
               </div>
 
               <TaskFollowUpSection />

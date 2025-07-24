@@ -1,16 +1,16 @@
 import { useCallback, useContext, useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useConfig } from '@/components/config-provider';
 import { attemptsApi, projectsApi } from '@/lib/api';
 import type { GitBranch, TaskAttempt } from 'shared/types';
-import { EXECUTOR_TYPES, EXECUTOR_LABELS } from 'shared/types';
+import { EXECUTOR_LABELS, EXECUTOR_TYPES } from 'shared/types';
 import {
   TaskAttemptDataContext,
   TaskAttemptLoadingContext,
   TaskAttemptStoppingContext,
   TaskDetailsContext,
-  TaskExecutionStateContext,
   TaskSelectedAttemptContext,
 } from '@/components/context/taskDetailsContext.ts';
 import CreatePRDialog from '@/components/tasks/Toolbar/CreatePRDialog.tsx';
@@ -28,13 +28,14 @@ function TaskDetailsToolbar() {
   const { selectedAttempt, setSelectedAttempt } = useContext(
     TaskSelectedAttemptContext
   );
+
   const { isStopping } = useContext(TaskAttemptStoppingContext);
-  const { fetchAttemptData, setAttemptData, isAttemptRunning } = useContext(
+  const { setAttemptData, isAttemptRunning } = useContext(
     TaskAttemptDataContext
   );
-  const { fetchExecutionState } = useContext(TaskExecutionStateContext);
 
   const [taskAttempts, setTaskAttempts] = useState<TaskAttempt[]>([]);
+  const location = useLocation();
 
   const { config } = useConfig();
 
@@ -64,10 +65,10 @@ function TaskDetailsToolbar() {
     setBranches(result);
     // Set current branch as default
     const currentBranch = result.find((b) => b.is_current);
-    if (currentBranch && !selectedBranch) {
-      setSelectedBranch(currentBranch.name);
+    if (currentBranch) {
+      setSelectedBranch((prev) => (!prev ? currentBranch.name : prev));
     }
-  }, [projectId, selectedBranch]);
+  }, [projectId]);
 
   useEffect(() => {
     fetchProjectBranches();
@@ -125,24 +126,47 @@ function TaskDetailsToolbar() {
       });
 
       if (result.length > 0) {
-        const latestAttempt = result.reduce((latest, current) =>
-          new Date(current.created_at) > new Date(latest.created_at)
-            ? current
-            : latest
-        );
+        // Check if there's an attempt query parameter
+        const urlParams = new URLSearchParams(location.search);
+        const attemptParam = urlParams.get('attempt');
+
+        let selectedAttemptToUse: TaskAttempt;
+
+        if (attemptParam) {
+          // Try to find the specific attempt
+          const specificAttempt = result.find(
+            (attempt) => attempt.id === attemptParam
+          );
+          if (specificAttempt) {
+            selectedAttemptToUse = specificAttempt;
+          } else {
+            // Fall back to latest if specific attempt not found
+            selectedAttemptToUse = result.reduce((latest, current) =>
+              new Date(current.created_at) > new Date(latest.created_at)
+                ? current
+                : latest
+            );
+          }
+        } else {
+          // Use latest attempt if no specific attempt requested
+          selectedAttemptToUse = result.reduce((latest, current) =>
+            new Date(current.created_at) > new Date(latest.created_at)
+              ? current
+              : latest
+          );
+        }
+
         setSelectedAttempt((prev) => {
-          if (JSON.stringify(prev) === JSON.stringify(latestAttempt))
+          if (JSON.stringify(prev) === JSON.stringify(selectedAttemptToUse))
             return prev;
-          return latestAttempt;
+          return selectedAttemptToUse;
         });
-        fetchAttemptData(latestAttempt.id, latestAttempt.task_id);
-        fetchExecutionState(latestAttempt.id, latestAttempt.task_id);
       } else {
         setSelectedAttempt(null);
         setAttemptData({
-          activities: [],
           processes: [],
           runningProcessDetails: {},
+          allLogs: [],
         });
       }
     } catch (error) {
@@ -150,7 +174,7 @@ function TaskDetailsToolbar() {
     } finally {
       setLoading(false);
     }
-  }, [task, projectId, fetchAttemptData, fetchExecutionState]);
+  }, [task, projectId, location.search]);
 
   useEffect(() => {
     fetchTaskAttempts();
@@ -235,7 +259,7 @@ function TaskDetailsToolbar() {
                   branches={branches}
                 />
               ) : (
-                <div className="text-center py-8 flex-1">
+                <div className="text-center py-8">
                   <div className="text-lg font-medium text-muted-foreground">
                     No attempts yet
                   </div>

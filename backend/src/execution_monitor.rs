@@ -6,8 +6,7 @@ use crate::{
     models::{
         execution_process::{ExecutionProcess, ExecutionProcessStatus, ExecutionProcessType},
         task::{Task, TaskStatus},
-        task_attempt::{TaskAttempt, TaskAttemptStatus},
-        task_attempt_activity::{CreateTaskAttemptActivity, TaskAttemptActivity},
+        task_attempt::TaskAttempt,
     },
     services::{NotificationConfig, NotificationService, ProcessService},
     utils::worktree_manager::WorktreeManager,
@@ -573,6 +572,15 @@ pub async fn execution_monitor(app_state: AppState) {
                                 handle_setup_completion(
                                     &app_state,
                                     task_attempt_id,
+                                    execution_process,
+                                    success,
+                                )
+                                .await;
+                            }
+                            ExecutionProcessType::CleanupScript => {
+                                handle_cleanup_completion(
+                                    &app_state,
+                                    task_attempt_id,
                                     execution_process_id,
                                     execution_process,
                                     success,
@@ -669,30 +677,7 @@ pub async fn execution_monitor(app_state: AppState) {
                             continue;
                         }
 
-                        // Create task attempt activity for non-dev server processes
-                        if process.process_type != ExecutionProcessType::DevServer {
-                            let activity_id = Uuid::new_v4();
-                            let create_activity = CreateTaskAttemptActivity {
-                                execution_process_id: process.id,
-                                status: Some(TaskAttemptStatus::ExecutorFailed),
-                                note: Some("Execution lost (server restart or crash)".to_string()),
-                            };
-
-                            if let Err(e) = TaskAttemptActivity::create(
-                                &app_state.db_pool,
-                                &create_activity,
-                                activity_id,
-                                TaskAttemptStatus::ExecutorFailed,
-                            )
-                            .await
-                            {
-                                tracing::error!(
-                                    "Failed to create failed activity for orphaned process: {}",
-                                    e
-                                );
-                                continue;
-                            }
-                        }
+                        // Process marked as failed
 
                         tracing::info!("Marked orphaned execution process {} as failed", process.id);
 
@@ -766,17 +751,9 @@ pub async fn execution_monitor(app_state: AppState) {
 async fn handle_setup_completion(
     app_state: &AppState,
     task_attempt_id: Uuid,
-    execution_process_id: Uuid,
     execution_process: ExecutionProcess,
     success: bool,
-    exit_code: Option<i64>,
 ) {
-    let exit_text = if let Some(code) = exit_code {
-        format!(" with exit code {}", code)
-    } else {
-        String::new()
-    };
-
     if success {
         // Mark setup as completed in database
         if let Err(e) = TaskAttempt::mark_setup_completed(&app_state.db_pool, task_attempt_id).await
@@ -788,25 +765,7 @@ async fn handle_setup_completion(
             );
         }
 
-        // Setup completed successfully, create activity
-        let activity_id = Uuid::new_v4();
-        let create_activity = CreateTaskAttemptActivity {
-            execution_process_id,
-            status: Some(TaskAttemptStatus::SetupComplete),
-            note: Some(format!("Setup script completed successfully{}", exit_text)),
-        };
-
-        if let Err(e) = TaskAttemptActivity::create(
-            &app_state.db_pool,
-            &create_activity,
-            activity_id,
-            TaskAttemptStatus::SetupComplete,
-        )
-        .await
-        {
-            tracing::error!("Failed to create setup complete activity: {}", e);
-            return;
-        }
+        // Setup completed successfully
 
         // Check for delegation context in process args
         let delegation_result = if let Some(args_json) = &execution_process.args {
@@ -845,24 +804,7 @@ async fn handle_setup_completion(
             }
         }
     } else {
-        // Setup failed, create activity and update task status
-        let activity_id = Uuid::new_v4();
-        let create_activity = CreateTaskAttemptActivity {
-            execution_process_id,
-            status: Some(TaskAttemptStatus::SetupFailed),
-            note: Some(format!("Setup script failed{}", exit_text)),
-        };
-
-        if let Err(e) = TaskAttemptActivity::create(
-            &app_state.db_pool,
-            &create_activity,
-            activity_id,
-            TaskAttemptStatus::SetupFailed,
-        )
-        .await
-        {
-            tracing::error!("Failed to create setup failed activity: {}", e);
-        }
+        // Setup failed, update task status
 
         // Update task status to InReview since setup failed
         if let Ok(Some(task_attempt)) =
@@ -897,12 +839,6 @@ async fn handle_coding_agent_completion(
     success: bool,
     exit_code: Option<i64>,
 ) {
-    let exit_text = if let Some(code) = exit_code {
-        format!(" with exit code {}", code)
-    } else {
-        String::new()
-    };
-
     // Extract and store assistant message from execution logs
     let summary = if let Some(stdout) = &execution_process.stdout {
         if let Some(assistant_message) = crate::executor::parse_assistant_message_from_logs(stdout)
@@ -934,67 +870,8 @@ async fn handle_coding_agent_completion(
         None
     };
 
-    // Send notifications if enabled
-    let sound_enabled = app_state.get_sound_alerts_enabled().await;
-    let push_enabled = app_state.get_push_notifications_enabled().await;
-
-    if sound_enabled || push_enabled {
-        let sound_file = app_state.get_sound_file().await;
-        let notification_config = NotificationConfig {
-            sound_enabled,
-            push_enabled,
-        };
-
-        let notification_service = NotificationService::new(notification_config);
-
-        // Get task attempt and task details for richer notification
-        let (notification_title, notification_message) = if let Ok(Some(task_attempt)) =
-            TaskAttempt::find_by_id(&app_state.db_pool, task_attempt_id).await
-        {
-            if let Ok(Some(task)) = Task::find_by_id(&app_state.db_pool, task_attempt.task_id).await
-            {
-                let title = format!("Task Complete: {}", task.title);
-                let message = if success {
-                    format!(
-                        "✅ '{}' completed successfully\nBranch: {}\nExecutor: {}",
-                        task.title,
-                        task_attempt.branch,
-                        task_attempt.executor.as_deref().unwrap_or("default")
-                    )
-                } else {
-                    format!(
-                        "❌ '{}' execution failed\nBranch: {}\nExecutor: {}",
-                        task.title,
-                        task_attempt.branch,
-                        task_attempt.executor.as_deref().unwrap_or("default")
-                    )
-                };
-                (title, message)
-            } else {
-                // Fallback if task not found
-                let title = "Task Complete";
-                let message = if success {
-                    "Task execution completed successfully"
-                } else {
-                    "Task execution failed"
-                };
-                (title.to_string(), message.to_string())
-            }
-        } else {
-            // Fallback if task attempt not found
-            let title = "Task Complete";
-            let message = if success {
-                "Task execution completed successfully"
-            } else {
-                "Task execution failed"
-            };
-            (title.to_string(), message.to_string())
-        };
-
-        notification_service
-            .notify(&notification_title, &notification_message, &sound_file)
-            .await;
-    }
+    // Note: Notifications and status updates moved to cleanup completion handler
+    // to ensure they only fire after all processing (including cleanup) is complete
 
     // Get task attempt to access worktree path for committing changes
     if let Ok(Some(task_attempt)) =
@@ -1020,65 +897,253 @@ async fn handle_coding_agent_completion(
             );
         }
 
-        // Create task attempt activity with appropriate completion status
-        let activity_id = Uuid::new_v4();
-        let status = if success {
-            TaskAttemptStatus::ExecutorComplete
-        } else {
-            TaskAttemptStatus::ExecutorFailed
-        };
-        let create_activity = CreateTaskAttemptActivity {
-            execution_process_id,
-            status: Some(status.clone()),
-            note: Some(format!("Coding agent execution completed{}", exit_text)),
-        };
+        // Coding agent execution completed
+        tracing::info!(
+            "Task attempt {} set to paused after coding agent completion",
+            task_attempt_id
+        );
 
-        if let Err(e) =
-            TaskAttemptActivity::create(&app_state.db_pool, &create_activity, activity_id, status)
-                .await
-        {
-            tracing::error!("Failed to create executor completion activity: {}", e);
-        } else {
-            tracing::info!(
-                "Task attempt {} set to paused after coding agent completion",
-                task_attempt_id
-            );
-
-            // Get task to access task_id and project_id for status update
-            if let Ok(Some(task)) = Task::find_by_id(&app_state.db_pool, task_attempt.task_id).await
+        // Run cleanup script if configured, otherwise immediately finalize task
+        if let Ok(Some(task)) = Task::find_by_id(&app_state.db_pool, task_attempt.task_id).await {
+            // Check if cleanup script should run
+            let should_run_cleanup = if let Ok(Some(project)) =
+                crate::models::project::Project::find_by_id(&app_state.db_pool, task.project_id)
+                    .await
             {
-                app_state
-                    .track_analytics_event(
-                        "task_attempt_finished",
-                        Some(serde_json::json!({
-                            "task_id": task.id.to_string(),
-                            "project_id": task.project_id.to_string(),
-                            "attempt_id": task_attempt_id.to_string(),
-                            "execution_success": success,
-                            "exit_code": exit_code,
-                        })),
-                    )
-                    .await;
+                project
+                    .cleanup_script
+                    .as_ref()
+                    .map(|script| !script.trim().is_empty())
+                    .unwrap_or(false)
+            } else {
+                false
+            };
 
-                // Update task status to InReview
-                if let Err(e) = Task::update_status(
-                    &app_state.db_pool,
-                    task.id,
-                    task.project_id,
-                    TaskStatus::InReview,
-                )
-                .await
+            if should_run_cleanup {
+                // Run cleanup script - completion will be handled in cleanup completion handler
+                if let Err(e) =
+                    crate::services::process_service::ProcessService::run_cleanup_script_if_configured(
+                        &app_state.db_pool,
+                        app_state,
+                        task_attempt_id,
+                        task_attempt.task_id,
+                        task.project_id,
+                    )
+                    .await
                 {
                     tracing::error!(
-                        "Failed to update task status to InReview for completed attempt: {}",
+                        "Failed to run cleanup script for attempt {}: {}",
+                        task_attempt_id,
                         e
                     );
+                    // Even if cleanup fails to start, finalize the task
+                    finalize_task_completion(app_state, task_attempt_id, &task, success, exit_code).await;
                 }
+            } else {
+                // No cleanup script configured, immediately finalize task
+                finalize_task_completion(app_state, task_attempt_id, &task, success, exit_code)
+                    .await;
             }
         }
     } else {
         tracing::error!(
             "Failed to find task attempt {} for coding agent completion",
+            task_attempt_id
+        );
+    }
+}
+
+/// Finalize task completion with notifications and status updates
+async fn finalize_task_completion(
+    app_state: &AppState,
+    task_attempt_id: Uuid,
+    task: &crate::models::task::Task,
+    success: bool,
+    exit_code: Option<i64>,
+) {
+    // Send notifications if enabled
+    let sound_enabled = app_state.get_sound_alerts_enabled().await;
+    let push_enabled = app_state.get_push_notifications_enabled().await;
+
+    if sound_enabled || push_enabled {
+        let sound_file = app_state.get_sound_file().await;
+        let notification_config = NotificationConfig {
+            sound_enabled,
+            push_enabled,
+        };
+
+        let notification_service = NotificationService::new(notification_config);
+
+        // Get task attempt for notification details
+        if let Ok(Some(task_attempt)) =
+            TaskAttempt::find_by_id(&app_state.db_pool, task_attempt_id).await
+        {
+            let title = format!("Task Complete: {}", task.title);
+            let message = if success {
+                format!(
+                    "✅ '{}' completed successfully\nBranch: {}\nExecutor: {}",
+                    task.title,
+                    task_attempt.branch,
+                    task_attempt.executor.as_deref().unwrap_or("default")
+                )
+            } else {
+                format!(
+                    "❌ '{}' execution failed\nBranch: {}\nExecutor: {}",
+                    task.title,
+                    task_attempt.branch,
+                    task_attempt.executor.as_deref().unwrap_or("default")
+                )
+            };
+
+            notification_service
+                .notify(&title, &message, &sound_file)
+                .await;
+        }
+    }
+
+    // Track analytics event
+    app_state
+        .track_analytics_event(
+            "task_attempt_finished",
+            Some(serde_json::json!({
+                "task_id": task.id.to_string(),
+                "project_id": task.project_id.to_string(),
+                "attempt_id": task_attempt_id.to_string(),
+                "execution_success": success,
+                "exit_code": exit_code,
+            })),
+        )
+        .await;
+
+    // Update task status to InReview
+    if let Err(e) = Task::update_status(
+        &app_state.db_pool,
+        task.id,
+        task.project_id,
+        TaskStatus::InReview,
+    )
+    .await
+    {
+        tracing::error!(
+            "Failed to update task status to InReview for completed attempt: {}",
+            e
+        );
+    }
+}
+
+/// Handle cleanup script completion
+async fn handle_cleanup_completion(
+    app_state: &AppState,
+    task_attempt_id: Uuid,
+    execution_process_id: Uuid,
+    _execution_process: ExecutionProcess,
+    success: bool,
+    exit_code: Option<i64>,
+) {
+    let exit_text = if let Some(code) = exit_code {
+        format!(" with exit code {}", code)
+    } else {
+        String::new()
+    };
+
+    tracing::info!(
+        "Cleanup script for task attempt {} completed{}",
+        task_attempt_id,
+        exit_text
+    );
+
+    // Update execution process status
+    let process_status = if success {
+        ExecutionProcessStatus::Completed
+    } else {
+        ExecutionProcessStatus::Failed
+    };
+
+    if let Err(e) = ExecutionProcess::update_completion(
+        &app_state.db_pool,
+        execution_process_id,
+        process_status,
+        exit_code,
+    )
+    .await
+    {
+        tracing::error!(
+            "Failed to update cleanup script execution process status: {}",
+            e
+        );
+    }
+
+    // Auto-commit changes after successful cleanup script execution
+    if success {
+        if let Ok(Some(task_attempt)) =
+            TaskAttempt::find_by_id(&app_state.db_pool, task_attempt_id).await
+        {
+            let commit_message = "Cleanup script";
+
+            if let Err(e) = commit_execution_changes(
+                &task_attempt.worktree_path,
+                task_attempt_id,
+                Some(commit_message),
+            )
+            .await
+            {
+                tracing::error!(
+                    "Failed to commit changes after cleanup script for attempt {}: {}",
+                    task_attempt_id,
+                    e
+                );
+            } else {
+                tracing::info!(
+                    "Successfully committed changes after cleanup script for attempt {}",
+                    task_attempt_id
+                );
+            }
+        } else {
+            tracing::error!(
+                "Failed to retrieve task attempt {} for cleanup commit",
+                task_attempt_id
+            );
+        }
+    }
+
+    // Finalize task completion after cleanup (whether successful or failed)
+    if let Ok(Some(task_attempt)) =
+        TaskAttempt::find_by_id(&app_state.db_pool, task_attempt_id).await
+    {
+        if let Ok(Some(task)) = Task::find_by_id(&app_state.db_pool, task_attempt.task_id).await {
+            // Get the coding agent execution process to determine original success status
+            let coding_success = if let Ok(processes) =
+                ExecutionProcess::find_by_task_attempt_id(&app_state.db_pool, task_attempt_id).await
+            {
+                // Find the most recent completed coding agent process
+                processes
+                    .iter()
+                    .filter(|p| {
+                        p.process_type
+                            == crate::models::execution_process::ExecutionProcessType::CodingAgent
+                    })
+                    .filter(|p| {
+                        p.status
+                            == crate::models::execution_process::ExecutionProcessStatus::Completed
+                    })
+                    .next_back()
+                    .map(|p| p.exit_code == Some(0))
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+
+            finalize_task_completion(app_state, task_attempt_id, &task, coding_success, exit_code)
+                .await;
+        } else {
+            tracing::error!(
+                "Failed to retrieve task {} for cleanup completion finalization",
+                task_attempt.task_id
+            );
+        }
+    } else {
+        tracing::error!(
+            "Failed to retrieve task attempt {} for cleanup completion finalization",
             task_attempt_id
         );
     }

@@ -1,11 +1,10 @@
 use std::path::Path;
 
 use async_trait::async_trait;
-use command_group::{AsyncCommandGroup, AsyncGroupChild};
-use tokio::process::Command;
 use uuid::Uuid;
 
 use crate::{
+    command_runner::{CommandProcess, CommandRunner},
     executor::{
         ActionType, Executor, ExecutorError, NormalizedConversation, NormalizedEntry,
         NormalizedEntryType,
@@ -14,13 +13,67 @@ use crate::{
     utils::shell::get_shell_command,
 };
 
-/// An executor that uses Claude CLI to process tasks
-pub struct ClaudeExecutor;
+fn create_watchkill_script(command: &str) -> String {
+    let claude_plan_stop_indicator = "Exit plan mode?";
+    format!(
+        r#"#!/usr/bin/env bash
+set -euo pipefail
 
-/// An executor that resumes a Claude session
-pub struct ClaudeFollowupExecutor {
-    pub session_id: String,
-    pub prompt: String,
+word="{}"
+command="{}"
+
+exit_code=0
+while IFS= read -r line; do
+    printf '%s\n' "$line"
+    if [[ $line == *"$word"* ]]; then
+        exit 0
+    fi
+done < <($command <&0 2>&1)
+
+exit_code=${{PIPESTATUS[0]}}
+exit "$exit_code"
+"#,
+        claude_plan_stop_indicator, command
+    )
+}
+
+/// An executor that uses Claude CLI to process tasks
+pub struct ClaudeExecutor {
+    executor_type: String,
+    command: String,
+}
+
+impl Default for ClaudeExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ClaudeExecutor {
+    /// Create a new ClaudeExecutor with default settings
+    pub fn new() -> Self {
+        Self {
+            executor_type: "Claude Code".to_string(),
+            command: "npx -y @anthropic-ai/claude-code@latest -p --dangerously-skip-permissions --verbose --output-format=stream-json".to_string(),
+        }
+    }
+
+    pub fn new_plan_mode() -> Self {
+        let command = "npx -y @anthropic-ai/claude-code@latest -p --permission-mode=plan --verbose --output-format=stream-json";
+        let script = create_watchkill_script(command);
+        Self {
+            executor_type: "ClaudePlan".to_string(),
+            command: script,
+        }
+    }
+
+    /// Create a new ClaudeExecutor with custom settings
+    pub fn with_command(executor_type: String, command: String) -> Self {
+        Self {
+            executor_type,
+            command,
+        }
+    }
 }
 
 #[async_trait]
@@ -30,7 +83,7 @@ impl Executor for ClaudeExecutor {
         pool: &sqlx::SqlitePool,
         task_id: Uuid,
         worktree_path: &str,
-    ) -> Result<AsyncGroupChild, ExecutorError> {
+    ) -> Result<CommandProcess, ExecutorError> {
         // Get the task to fetch its description
         let task = Task::find_by_id(pool, task_id)
             .await?
@@ -56,51 +109,67 @@ Task title: {}"#,
         // Use shell command for cross-platform compatibility
         let (shell_cmd, shell_arg) = get_shell_command();
         // Pass prompt via stdin instead of command line to avoid shell escaping issues
-        let claude_command = "npx -y @anthropic-ai/claude-code@latest -p --dangerously-skip-permissions --verbose --output-format=stream-json";
+        let claude_command = &self.command;
 
-        let mut command = Command::new(shell_cmd);
+        let mut command = CommandRunner::new();
         command
-            .kill_on_drop(true)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .current_dir(worktree_path)
+            .command(shell_cmd)
             .arg(shell_arg)
             .arg(claude_command)
+            .stdin(&prompt)
+            .working_dir(worktree_path)
             .env("NODE_NO_WARNINGS", "1");
 
-        let mut child = command
-            .group_spawn() // Create new process group so we can kill entire tree
-            .map_err(|e| {
-                crate::executor::SpawnContext::from_command(&command, "Claude")
-                    .with_task(task_id, Some(task.title.clone()))
-                    .with_context("Claude CLI execution for new task")
-                    .spawn_error(e)
-            })?;
+        let proc = command.start().await.map_err(|e| {
+            crate::executor::SpawnContext::from_command(&command, &self.executor_type)
+                .with_task(task_id, Some(task.title.clone()))
+                .with_context(format!("{} CLI execution for new task", self.executor_type))
+                .spawn_error(e)
+        })?;
+        Ok(proc)
+    }
 
-        // Write prompt to stdin safely
-        if let Some(mut stdin) = child.inner().stdin.take() {
-            use tokio::io::AsyncWriteExt;
-            tracing::debug!(
-                "Writing prompt to Claude stdin for task {}: {:?}",
-                task_id,
-                prompt
+    async fn spawn_followup(
+        &self,
+        _pool: &sqlx::SqlitePool,
+        _task_id: Uuid,
+        session_id: &str,
+        prompt: &str,
+        worktree_path: &str,
+    ) -> Result<CommandProcess, ExecutorError> {
+        // Use shell command for cross-platform compatibility
+        let (shell_cmd, shell_arg) = get_shell_command();
+
+        // Determine the command based on whether this is plan mode or not
+        let claude_command = if self.executor_type == "ClaudePlan" {
+            let command = format!(
+                "npx -y @anthropic-ai/claude-code@latest -p --permission-mode=plan --verbose --output-format=stream-json --resume={}",
+                session_id
             );
-            stdin.write_all(prompt.as_bytes()).await.map_err(|e| {
-                let context = crate::executor::SpawnContext::from_command(&command, "Claude")
-                    .with_task(task_id, Some(task.title.clone()))
-                    .with_context("Failed to write prompt to Claude CLI stdin");
-                ExecutorError::spawn_failed(e, context)
-            })?;
-            stdin.shutdown().await.map_err(|e| {
-                let context = crate::executor::SpawnContext::from_command(&command, "Claude")
-                    .with_task(task_id, Some(task.title.clone()))
-                    .with_context("Failed to close Claude CLI stdin");
-                ExecutorError::spawn_failed(e, context)
-            })?;
-        }
+            create_watchkill_script(&command)
+        } else {
+            format!("{} --resume={}", self.command, session_id)
+        };
 
-        Ok(child)
+        let mut command = CommandRunner::new();
+        command
+            .command(shell_cmd)
+            .arg(shell_arg)
+            .arg(&claude_command)
+            .stdin(prompt)
+            .working_dir(worktree_path)
+            .env("NODE_NO_WARNINGS", "1");
+
+        let proc = command.start().await.map_err(|e| {
+            crate::executor::SpawnContext::from_command(&command, &self.executor_type)
+                .with_context(format!(
+                    "{} CLI followup execution for session {}",
+                    self.executor_type, session_id
+                ))
+                .spawn_error(e)
+        })?;
+
+        Ok(proc)
     }
 
     fn normalize_logs(
@@ -277,7 +346,7 @@ Task title: {}"#,
         Ok(NormalizedConversation {
             entries,
             session_id,
-            executor_type: "claude".to_string(),
+            executor_type: self.executor_type.clone(),
             prompt: None,
             summary: None,
         })
@@ -288,6 +357,7 @@ impl ClaudeExecutor {
     /// Convert absolute paths to relative paths based on worktree path
     fn make_path_relative(&self, path: &str, worktree_path: &str) -> String {
         let path_obj = Path::new(path);
+        let worktree_path_obj = Path::new(worktree_path);
 
         tracing::debug!("Making path relative: {} -> {}", path, worktree_path);
 
@@ -297,13 +367,59 @@ impl ClaudeExecutor {
         }
 
         // Try to make path relative to the worktree path
-        let worktree_path_obj = Path::new(worktree_path);
-        if let Ok(relative_path) = path_obj.strip_prefix(worktree_path_obj) {
-            return relative_path.to_string_lossy().to_string();
-        }
+        match path_obj.strip_prefix(worktree_path_obj) {
+            Ok(relative_path) => {
+                let result = relative_path.to_string_lossy().to_string();
+                tracing::debug!("Successfully made relative: '{}' -> '{}'", path, result);
+                result
+            }
+            Err(_) => {
+                // Handle symlinks by resolving canonical paths
+                let canonical_path = std::fs::canonicalize(path);
+                let canonical_worktree = std::fs::canonicalize(worktree_path);
 
-        // If we can't make it relative, return the original path
-        path.to_string()
+                match (canonical_path, canonical_worktree) {
+                    (Ok(canon_path), Ok(canon_worktree)) => {
+                        tracing::debug!(
+                            "Trying canonical path resolution: '{}' -> '{}', '{}' -> '{}'",
+                            path,
+                            canon_path.display(),
+                            worktree_path,
+                            canon_worktree.display()
+                        );
+
+                        match canon_path.strip_prefix(&canon_worktree) {
+                            Ok(relative_path) => {
+                                let result = relative_path.to_string_lossy().to_string();
+                                tracing::debug!(
+                                    "Successfully made relative with canonical paths: '{}' -> '{}'",
+                                    path,
+                                    result
+                                );
+                                result
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Failed to make canonical path relative: '{}' relative to '{}', error: {}, returning original",
+                                    canon_path.display(),
+                                    canon_worktree.display(),
+                                    e
+                                );
+                                path.to_string()
+                            }
+                        }
+                    }
+                    _ => {
+                        tracing::debug!(
+                            "Could not canonicalize paths (paths may not exist): '{}', '{}', returning original",
+                            path,
+                            worktree_path
+                        );
+                        path.to_string()
+                    }
+                }
+            }
+        }
     }
 
     fn generate_concise_content(
@@ -320,6 +436,7 @@ impl ClaudeExecutor {
             ActionType::Search { query } => format!("`{}`", query),
             ActionType::WebFetch { url } => format!("`{}`", url),
             ActionType::TaskCreate { description } => description.clone(),
+            ActionType::PlanPresentation { plan } => plan.clone(),
             ActionType::Other { description: _ } => {
                 // For other tools, try to extract key information or fall back to tool name
                 match tool_name.to_lowercase().as_str() {
@@ -490,87 +607,21 @@ impl ClaudeExecutor {
                     }
                 }
             }
+            "exit_plan_mode" | "exitplanmode" | "exit-plan-mode" => {
+                if let Some(plan) = input.get("plan").and_then(|p| p.as_str()) {
+                    ActionType::PlanPresentation {
+                        plan: plan.to_string(),
+                    }
+                } else {
+                    ActionType::Other {
+                        description: "Plan presentation".to_string(),
+                    }
+                }
+            }
             _ => ActionType::Other {
                 description: format!("Tool: {}", tool_name),
             },
         }
-    }
-}
-
-#[async_trait]
-impl Executor for ClaudeFollowupExecutor {
-    async fn spawn(
-        &self,
-        _pool: &sqlx::SqlitePool,
-        _task_id: Uuid,
-        worktree_path: &str,
-    ) -> Result<AsyncGroupChild, ExecutorError> {
-        // Use shell command for cross-platform compatibility
-        let (shell_cmd, shell_arg) = get_shell_command();
-        // Pass prompt via stdin instead of command line to avoid shell escaping issues
-        let claude_command = format!(
-            "npx -y @anthropic-ai/claude-code@latest -p --dangerously-skip-permissions --verbose --output-format=stream-json --resume={}",
-            self.session_id
-        );
-
-        let mut command = Command::new(shell_cmd);
-        command
-            .kill_on_drop(true)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .current_dir(worktree_path)
-            .arg(shell_arg)
-            .arg(&claude_command);
-
-        let mut child = command
-            .group_spawn() // Create new process group so we can kill entire tree
-            .map_err(|e| {
-                crate::executor::SpawnContext::from_command(&command, "Claude")
-                    .with_context(format!(
-                        "Claude CLI followup execution for session {}",
-                        self.session_id
-                    ))
-                    .spawn_error(e)
-            })?;
-
-        // Write prompt to stdin safely
-        if let Some(mut stdin) = child.inner().stdin.take() {
-            use tokio::io::AsyncWriteExt;
-            tracing::debug!(
-                "Writing prompt to Claude stdin for session {}: {:?}",
-                self.session_id,
-                self.prompt
-            );
-            stdin.write_all(self.prompt.as_bytes()).await.map_err(|e| {
-                let context = crate::executor::SpawnContext::from_command(&command, "Claude")
-                    .with_context(format!(
-                        "Failed to write prompt to Claude CLI stdin for session {}",
-                        self.session_id
-                    ));
-                ExecutorError::spawn_failed(e, context)
-            })?;
-            stdin.shutdown().await.map_err(|e| {
-                let context = crate::executor::SpawnContext::from_command(&command, "Claude")
-                    .with_context(format!(
-                        "Failed to close Claude CLI stdin for session {}",
-                        self.session_id
-                    ));
-                ExecutorError::spawn_failed(e, context)
-            })?;
-        }
-
-        Ok(child)
-    }
-
-    fn normalize_logs(
-        &self,
-        logs: &str,
-        worktree_path: &str,
-    ) -> Result<NormalizedConversation, String> {
-        // Reuse the same logic as the main ClaudeExecutor
-        let main_executor = ClaudeExecutor;
-        main_executor.normalize_logs(logs, worktree_path)
     }
 }
 
@@ -580,7 +631,7 @@ mod tests {
 
     #[test]
     fn test_normalize_logs_ignores_result_type() {
-        let executor = ClaudeExecutor;
+        let executor = ClaudeExecutor::new();
         let logs = r#"{"type":"system","subtype":"init","cwd":"/private/tmp","session_id":"e988eeea-3712-46a1-82d4-84fbfaa69114","tools":[],"model":"claude-sonnet-4-20250514"}
 {"type":"assistant","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"Hello world"}],"stop_reason":null},"session_id":"e988eeea-3712-46a1-82d4-84fbfaa69114"}
 {"type":"result","subtype":"success","is_error":false,"duration_ms":6059,"result":"Final result"}
@@ -606,7 +657,7 @@ mod tests {
 
     #[test]
     fn test_make_path_relative() {
-        let executor = ClaudeExecutor;
+        let executor = ClaudeExecutor::new();
 
         // Test with relative path (should remain unchanged)
         assert_eq!(
@@ -623,7 +674,7 @@ mod tests {
 
     #[test]
     fn test_todo_tool_content_extraction() {
-        let executor = ClaudeExecutor;
+        let executor = ClaudeExecutor::new();
 
         // Test TodoWrite with actual todo list
         let todo_input = serde_json::json!({
@@ -666,7 +717,7 @@ mod tests {
 
     #[test]
     fn test_todo_tool_empty_list() {
-        let executor = ClaudeExecutor;
+        let executor = ClaudeExecutor::new();
 
         // Test TodoWrite with empty todo list
         let empty_input = serde_json::json!({
@@ -687,7 +738,7 @@ mod tests {
 
     #[test]
     fn test_todo_tool_no_todos_field() {
-        let executor = ClaudeExecutor;
+        let executor = ClaudeExecutor::new();
 
         // Test TodoWrite with no todos field
         let no_todos_input = serde_json::json!({
@@ -708,7 +759,7 @@ mod tests {
 
     #[test]
     fn test_glob_tool_content_extraction() {
-        let executor = ClaudeExecutor;
+        let executor = ClaudeExecutor::new();
 
         // Test Glob with pattern and path
         let glob_input = serde_json::json!({
@@ -730,7 +781,7 @@ mod tests {
 
     #[test]
     fn test_glob_tool_pattern_only() {
-        let executor = ClaudeExecutor;
+        let executor = ClaudeExecutor::new();
 
         // Test Glob with pattern only
         let glob_input = serde_json::json!({
@@ -751,7 +802,7 @@ mod tests {
 
     #[test]
     fn test_ls_tool_content_extraction() {
-        let executor = ClaudeExecutor;
+        let executor = ClaudeExecutor::new();
 
         // Test LS with path
         let ls_input = serde_json::json!({
